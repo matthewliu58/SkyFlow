@@ -33,7 +33,7 @@ type LargeFile struct {
 
 func V1ProxyLargeUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 生成请求唯一标识，用于日志追踪
+		// Generate unique request ID for log tracking
 		pre := util.GenerateRandomLetters(5)
 		logger.Info("V1ProxyLargeUploadHandler start", slog.String("pre", pre))
 
@@ -45,7 +45,7 @@ func V1ProxyLargeUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 
 func V1ClientLargeUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 生成请求唯一标识，用于日志追踪
+		// Generate unique request ID for log tracking
 		pre := util.GenerateRandomLetters(5)
 		logger.Info("V1ClientLargeUploadHandler start", slog.String("pre", pre))
 
@@ -59,16 +59,16 @@ func processUploadLogic(c *gin.Context, clientB bool, pre string, logger *slog.L
 
 	logger.Info("Start processing upload logic", slog.String("pre", pre), slog.Any("client", clientB))
 
-	// 1. 解析请求头和请求体，构建上传基础信息
+	// 1. Parse request headers and body, build basic upload info
 	largeFile, err := ParseHeadersAndBuildUploadInfo_(c, pre, logger)
 	if err != nil {
-		return // 错误已在ParseHeadersAndBuildUploadInfo内部处理并返回响应
+		return // Error already handled inside ParseHeadersAndBuildUploadInfo with response returned
 	}
 	fo := upload.UploadFunc_(clientB, largeFile.Upload, pre, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer func() {
-		cancel() // 无论正常/异常退出，都取消上下文
+		cancel() // Cancel context on both normal and abnormal exit
 		logger.Info("Large upload context canceled", slog.String("pre", pre))
 	}()
 
@@ -77,7 +77,7 @@ func processUploadLogic(c *gin.Context, clientB bool, pre string, logger *slog.L
 		err := fmt.Errorf("GetFileSize is nil")
 		logger.Error("GetFileSize is nil", slog.String("pre", pre), slog.String("error", err.Error()))
 		handleError(c, logger, pre, http.StatusInternalServerError, "GetFileSize is nil", err)
-		return // 补充return，原代码此处遗漏return会继续执行后续逻辑
+		return // Added return, original code was missing return which would continue execution
 	}
 	l, err := fo.GetFileSize.GetFileSize(ctx, up.File.FileName, pre, logger)
 	if err != nil {
@@ -101,7 +101,7 @@ func processUploadLogic(c *gin.Context, clientB bool, pre string, logger *slog.L
 			err := fmt.Errorf("ComposeFile is nil")
 			logger.Error("ComposeFile is nil", slog.String("pre", pre), slog.String("error", err.Error()))
 			handleError(c, logger, pre, http.StatusInternalServerError, "ComposeFile is nil", err)
-			return // 补充return，原代码此处遗漏return会继续执行后续逻辑
+			return // Added return, original code was missing return which would continue execution
 		}
 		err := fo.ComposeFile.ComposeFile(ctx, up.File.FileName, list, pre, logger)
 		if err != nil {
@@ -129,20 +129,20 @@ func ParseHeadersAndBuildUploadInfo_(c *gin.Context, pre string, logger *slog.Lo
 	return req, nil
 }
 
-// 函数返回值：[]string（拆分后的文件名列表）, error
+// Function returns: []string (split file name list), error
 func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre string, logger *slog.Logger) ([]string, error) {
-	// 存储拆分后的文件名列表
+	// Store split file name list
 	var splitFileNames []string
 
-	// 1. 基础参数校验
-	logger.Info("开始处理大文件分片上传",
+	// 1. Basic parameter validation
+	logger.Info("starting large file chunk upload processing",
 		slog.String("pre", pre),
 		slog.String("func", "ProcessLargeFileUpload"),
 	)
 
 	if len(largeFile.VMs) == 0 {
-		err := fmt.Errorf("没有可用的VM节点")
-		logger.Error("参数校验失败",
+		err := fmt.Errorf("no available VM nodes")
+		logger.Error("parameter validation failed",
 			slog.String("pre", pre),
 			slog.String("func", "ProcessLargeFileUpload"),
 			slog.String("error", err.Error()),
@@ -153,27 +153,27 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 	file := largeFile.Upload.File
 	if file.FileLength == 0 {
 		file.FileLength = size
-		logger.Info("文件长度为0，使用传入的size赋值",
+		logger.Info("file length is 0, using provided size",
 			slog.String("pre", pre),
 			slog.String("func", "ProcessLargeFileUpload"),
 			slog.Int64("file_length", file.FileLength),
 		)
 	}
 
-	// 2. 计算总权重和每个VM应分配的字节数
+	// 2. Calculate total weight and bytes per VM
 	totalWeight := int64(0)
 	for _, vm := range largeFile.VMs {
 		totalWeight += vm.Weight
 	}
-	logger.Info("计算VM总权重完成",
+	logger.Info("VM total weight calculation complete",
 		slog.String("pre", pre),
 		slog.String("func", "ProcessLargeFileUpload"),
 		slog.Int64("total_weight", totalWeight),
 	)
 
 	if totalWeight == 0 {
-		err := fmt.Errorf("所有VM的权重总和不能为0")
-		logger.Error("权重校验失败",
+		err := fmt.Errorf("total weight of all VMs cannot be 0")
+		logger.Error("weight validation failed",
 			slog.String("pre", pre),
 			slog.String("func", "ProcessLargeFileUpload"),
 			slog.String("error", err.Error()),
@@ -181,32 +181,32 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 		return nil, err
 	}
 
-	// 3. 计算分片（四舍五入确保总长度一致）
+	// 3. Calculate chunks (round to ensure total length consistency)
 	var offset int64 = file.FileStart
-	vmTasks := make(map[string]base.UploadStruct) // 存储每个VM对应的上传任务
+	vmTasks := make(map[string]base.UploadStruct) // Store upload task per VM
 
 	for i, vm := range largeFile.VMs {
-		// 计算当前VM应分配的字节数（四舍五入）
+		// Calculate bytes allocated to current VM (rounded)
 		allocatedLength := (file.FileLength*vm.Weight + totalWeight/2) / totalWeight
 
-		// 最后一个VM处理剩余字节（避免四舍五入导致总长度不一致）
+		// Last VM handles remaining bytes (avoid total length inconsistency from rounding)
 		if i == len(largeFile.VMs)-1 {
 			allocatedLength = file.FileStart + file.FileLength - offset
 		}
 
-		// 构建当前VM的上传结构体
+		// Build current VM's upload struct
 		uploadTask := largeFile.Upload
 		uploadTask.File.FileStart = offset
 		uploadTask.File.FileLength = allocatedLength
 
-		// 生成分片文件名
+		// Generate chunk file name
 		splitFileName := fmt.Sprintf("%s_%d", file.NewFileName, i)
 		uploadTask.File.NewFileName = splitFileName
-		// 将分片文件名加入列表
+		// Add chunk file name to list
 		splitFileNames = append(splitFileNames, splitFileName)
 
 		vmTasks[vm.IP] = uploadTask
-		logger.Info("VM分片计算完成",
+		logger.Info("VM chunk calculation complete",
 			slog.String("pre", pre),
 			slog.String("func", "ProcessLargeFileUpload"),
 			slog.String("vm_ip", vm.IP),
@@ -216,12 +216,12 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 		offset += allocatedLength
 	}
 
-	// 4. 并发发送请求并等待所有结果
+	// 4. Send requests concurrently and wait for all results
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
 
-	logger.Info("开始并发发送上传请求",
+	logger.Info("starting concurrent upload requests",
 		slog.String("pre", pre),
 		slog.String("func", "ProcessLargeFileUpload"),
 		slog.Int("task_count", len(vmTasks)),
@@ -233,20 +233,20 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 		go func(ip string, task base.UploadStruct) {
 			defer wg.Done()
 
-			// 构造请求URL
+			// Construct request URL
 			url := fmt.Sprintf("http://%s:8080/api/v1/proxy/upload", ip)
 			if cleintB {
 				url = fmt.Sprintf("http://%s:8080/api/v1/client/upload", ip)
 			}
 
-			// 序列化上传结构体为JSON
+			// Serialize upload struct to JSON
 			jsonData, err := json.Marshal(task)
 			if err != nil {
 				mu.Lock()
-				finalErr := fmt.Errorf("序列化任务失败（%s）：%v", ip, err)
+				finalErr := fmt.Errorf("failed to serialize task (%s): %v", ip, err)
 				errs = append(errs, finalErr)
 				mu.Unlock()
-				logger.Error("任务序列化失败",
+				logger.Error("task serialization failed",
 					slog.String("pre", pre),
 					slog.String("func", "ProcessLargeFileUpload"),
 					slog.String("vm_ip", ip),
@@ -258,10 +258,10 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 			if err != nil {
 				mu.Lock()
-				finalErr := fmt.Errorf("创建请求失败（%s）：%v", ip, err)
+				finalErr := fmt.Errorf("failed to create request (%s): %v", ip, err)
 				errs = append(errs, finalErr)
 				mu.Unlock()
-				logger.Error("创建请求失败",
+				logger.Error("create request failed",
 					slog.String("pre", pre),
 					slog.String("func", "ProcessLargeFileUpload"),
 					slog.String("vm_ip", ip),
@@ -275,21 +275,21 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 			//token, err := util.GetGCPShortToken(context.Background(), config.Config_.GCPServiceAccount, pre, logger)
 			//if err != nil {
 			//	mu.Lock()
-			//	finalErr := fmt.Errorf("获取GCP短令牌失败（%s）：%v", ip, err)
+			//	finalErr := fmt.Errorf("failed to get GCP short token (%s): %v", ip, err)
 			//	errs = append(errs, finalErr)
 			//	return
 			//}
 			//req.Header.Set("Authorization", "Bearer "+token)
 
-			logger.Info("上传请求准备发送", slog.String("pre", pre), slog.Time("time", time.Now()))
+			logger.Info("upload request ready to send", slog.String("pre", pre), slog.Time("time", time.Now()))
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				mu.Lock()
-				finalErr := fmt.Errorf("请求发送失败（%s）：%v", ip, err)
+				finalErr := fmt.Errorf("failed to send request (%s): %v", ip, err)
 				errs = append(errs, finalErr)
 				mu.Unlock()
-				logger.Error("HTTP请求发送失败",
+				logger.Error("HTTP request send failed",
 					slog.String("pre", pre),
 					slog.String("func", "ProcessLargeFileUpload"),
 					slog.String("vm_ip", ip),
@@ -299,13 +299,13 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 			}
 			defer resp.Body.Close()
 
-			// 核心校验：HTTP状态码是否为200（http.StatusOK）
+			// Core check: whether HTTP status code is 200 (http.StatusOK)
 			if resp.StatusCode != http.StatusOK {
 				mu.Lock()
-				finalErr := fmt.Errorf("节点响应状态码异常（%s）：%d", ip, resp.StatusCode)
+				finalErr := fmt.Errorf("node response status abnormal (%s): %d", ip, resp.StatusCode)
 				errs = append(errs, finalErr)
 				mu.Unlock()
-				logger.Error("VM响应状态码异常",
+				logger.Error("VM response status abnormal",
 					slog.String("pre", pre),
 					slog.String("func", "ProcessLargeFileUpload"),
 					slog.String("vm_ip", ip),
@@ -315,14 +315,14 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 				return
 			}
 
-			// 读取响应体（仅处理读取失败场景，不打印内容）
+			// Read response body (only handle read failure, don't print content)
 			_, err = ioutil.ReadAll(resp.Body)
 			if err != nil {
 				mu.Lock()
-				finalErr := fmt.Errorf("读取响应失败（%s）：%v", ip, err)
+				finalErr := fmt.Errorf("failed to read response (%s): %v", ip, err)
 				errs = append(errs, finalErr)
 				mu.Unlock()
-				logger.Error("响应体读取失败",
+				logger.Error("response body read failed",
 					slog.String("pre", pre),
 					slog.String("func", "ProcessLargeFileUpload"),
 					slog.String("vm_ip", ip),
@@ -331,7 +331,7 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 				return
 			}
 
-			logger.Info("VM上传请求处理成功",
+			logger.Info("VM upload request processed successfully",
 				slog.String("pre", pre),
 				slog.String("func", "ProcessLargeFileUpload"),
 				slog.String("vm_ip", ip),
@@ -339,7 +339,7 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 		}(ip, task)
 	}
 
-	// 带超时的等待逻辑
+	// Wait logic with timeout
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -348,12 +348,12 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 
 	select {
 	case <-done:
-		// 所有协程正常完成
+		// All goroutines completed normally
 	case <-time.After(LargeFileUploadTimeout):
-		// 超时触发
-		finalErr := fmt.Errorf("上传任务超时（超时时间：%v），部分VM可能未完成处理", LargeFileUploadTimeout)
+		// Timeout triggered
+		finalErr := fmt.Errorf("upload task timed out (timeout: %v), some VMs may not have completed", LargeFileUploadTimeout)
 		errs = append(errs, finalErr)
-		logger.Error("上传任务超时",
+		logger.Error("upload task timed out",
 			slog.String("pre", pre),
 			slog.String("func", "ProcessLargeFileUpload"),
 			slog.Duration("timeout", LargeFileUploadTimeout),
@@ -363,7 +363,7 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 	}
 
 	if len(errs) <= 0 {
-		logger.Info("所有VM上传请求处理完成，全部成功",
+		logger.Info("all VM upload requests completed successfully",
 			slog.String("pre", pre),
 			slog.String("func", "ProcessLargeFileUpload"),
 			slog.Any("split_file_names", splitFileNames),
@@ -371,7 +371,7 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 		return splitFileNames, nil
 	}
 
-	logger.Error("部分VM上传请求处理失败",
+	logger.Error("partial VM upload requests failed",
 		slog.String("pre", pre),
 		slog.String("func", "ProcessLargeFileUpload"),
 		slog.Any("error", errs),

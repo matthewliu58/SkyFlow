@@ -10,27 +10,27 @@ import (
 	"rigel-client/util"
 )
 
-// 核心Header常量
+// Core header constants
 const (
-	HeaderChunkName  = "X-Chunk-Name"  // 单个分片的自定义名称
-	HeaderChunkNames = "X-Chunk-Names" // 逗号分隔的分片名列表（合并顺序）
+	HeaderChunkName  = "X-Chunk-Name"  // Custom name for a single chunk
+	HeaderChunkNames = "X-Chunk-Names" // Comma-separated chunk name list (merge order)
 )
 
-// ChunkMergeConfig 分片合并配置（适配发送端指定规则）
+// ChunkMergeConfig chunk merge configuration (adapted to sender-specified rules)
 type ChunkMergeConfig struct {
-	BaseDir       string   // 分片存储目录
-	FinalFileName string   // 最终合并后的文件名
-	ChunkNames    []string // 发送端指定的分片名列表（按合并顺序）
-	DeleteChunks  bool     // 合并后是否删除分片
+	BaseDir       string   // Chunk storage directory
+	FinalFileName string   // Final merged file name
+	ChunkNames    []string // Sender-specified chunk name list (in merge order)
+	DeleteChunks  bool     // Whether to delete chunks after merge
 }
 
-// ChunkUploadHandler 分片上传接口（接收发送端自定义命名的分片）
+// ChunkUploadHandler chunk upload handler (receives sender-named chunks)
 func ChunkUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		pre := util.GenerateRandomLetters(5)
 		logger.Info("ChunkUploadHandler start", slog.String("pre", pre))
 
-		// 1. 获取Header参数
+		// 1. Get header parameters
 		finalFileName := c.GetHeader(util.HeaderFileName)
 		chunkName := c.GetHeader(HeaderChunkName)
 		if finalFileName == "" || chunkName == "" {
@@ -43,7 +43,7 @@ func ChunkUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 
-		// 2. 获取上传的分片文件
+		// 2. Get uploaded chunk file
 		file, _, err := c.Request.FormFile("file")
 		if err != nil {
 			logger.Error("ChunkUploadHandler get chunk file failed", slog.String("pre", pre), slog.Any("err", err))
@@ -52,24 +52,24 @@ func ChunkUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 		}
 		defer file.Close()
 
-		// 3. 确保本地目录存在
+		// 3. Ensure local directory exists
 		if err := os.MkdirAll(LocalBaseDir, 0755); err != nil {
 			logger.Error("ChunkUploadHandler create base dir failed", slog.String("pre", pre), slog.Any("err", err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Create local dir failed: " + err.Error()})
 			return
 		}
 
-		// 4. 生成分片保存路径（使用发送端指定的分片名）
+		// 4. Generate chunk save path (using sender-specified chunk name)
 		chunkPath := filepath.Join(LocalBaseDir, chunkName)
 
-		// 5. 保存分片文件
+		// 5. Save chunk file
 		if err := SaveFileChunk(file, chunkPath, pre, logger); err != nil {
 			logger.Error("ChunkUploadHandler save chunk failed", slog.String("pre", pre), slog.Any("err", err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Save chunk failed: " + err.Error()})
 			return
 		}
 
-		// 6. 返回成功响应
+		// 6. Return success response
 		logger.Info("ChunkUploadHandler success", slog.String("pre", pre),
 			slog.String("finalFileName", finalFileName),
 			slog.String("chunkName", chunkName),
@@ -84,7 +84,7 @@ func ChunkUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 	}
 }
 
-// ChunkMergeHandler 分片合并接口（按发送端指定的顺序合并）
+// ChunkMergeHandler chunk merge handler (merge in sender-specified order)
 func ChunkMergeHandler(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		pre := util.GenerateRandomLetters(5)
@@ -97,7 +97,7 @@ func ChunkMergeHandler(logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 
-		// 1. 获取Header参数
+		// 1. Get header parameters
 		finalFileName := c.GetHeader(util.HeaderFileName)
 		if finalFileName == "" || len(req.ChunkNames) <= 0 {
 			logger.Error("ChunkMergeHandler missing header", slog.String("pre", pre), slog.Any("req", req))
@@ -107,7 +107,7 @@ func ChunkMergeHandler(logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 
-		// 2. 解析分片名列表（按发送端指定的顺序）
+		// 2. Parse chunk name list (in sender-specified order)
 		chunkNames := req.ChunkNames
 		if len(chunkNames) == 0 {
 			logger.Error("ChunkMergeHandler empty chunk list", slog.String("pre", pre))
@@ -118,7 +118,7 @@ func ChunkMergeHandler(logger *slog.Logger) gin.HandlerFunc {
 		// 3. Whether to delete chunks after merge
 		deleteChunks := req.DeleteChunks
 
-		// 4. 构建合并配置
+		// 4. Build merge config
 		mergeCfg := ChunkMergeConfig{
 			BaseDir:       LocalBaseDir,
 			FinalFileName: finalFileName,
@@ -126,7 +126,7 @@ func ChunkMergeHandler(logger *slog.Logger) gin.HandlerFunc {
 			DeleteChunks:  deleteChunks,
 		}
 
-		// 5. 执行分片合并
+		// 5. Execute chunk merge
 		if err := MergeFileChunks(mergeCfg, pre, logger); err != nil {
 			logger.Error("ChunkMergeHandler merge failed", slog.String("pre", pre), slog.Any("err", err))
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -136,7 +136,7 @@ func ChunkMergeHandler(logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 
-		// 6. 返回成功响应
+		// 6. Return success response
 		finalPath := filepath.Join(LocalBaseDir, finalFileName)
 		logger.Info("ChunkMergeHandler success", slog.String("pre", pre),
 			slog.String("finalFileName", finalFileName),
@@ -152,9 +152,9 @@ func ChunkMergeHandler(logger *slog.Logger) gin.HandlerFunc {
 	}
 }
 
-// SaveFileChunk 保存单个分片文件（接收发送端自定义命名）
+// SaveFileChunk saves a single chunk file (receives sender-named chunk)
 func SaveFileChunk(chunkFile io.Reader, chunkPath string, pre string, logger *slog.Logger) error {
-	// 创建分片目录（如果不存在）
+	// Create chunk directory if not exists
 	chunkDir := filepath.Dir(chunkPath)
 	if err := os.MkdirAll(chunkDir, 0755); err != nil {
 		logger.Error("SaveFileChunk create dir failed", slog.String("pre", pre),
@@ -162,7 +162,7 @@ func SaveFileChunk(chunkFile io.Reader, chunkPath string, pre string, logger *sl
 		return err
 	}
 
-	// 创建分片文件并写入内容
+	// Create chunk file and write content
 	chunkOutFile, err := os.Create(chunkPath)
 	if err != nil {
 		logger.Error("SaveFileChunk create chunk file failed", slog.String("pre", pre),
@@ -171,7 +171,7 @@ func SaveFileChunk(chunkFile io.Reader, chunkPath string, pre string, logger *sl
 	}
 	defer chunkOutFile.Close()
 
-	// 流式写入（支持大文件）
+	// Stream write (supports large files)
 	if _, err = io.Copy(chunkOutFile, chunkFile); err != nil {
 		logger.Error("SaveFileChunk write chunk failed", slog.String("pre", pre),
 			slog.String("chunkPath", chunkPath), slog.Any("err", err))
@@ -182,23 +182,23 @@ func SaveFileChunk(chunkFile io.Reader, chunkPath string, pre string, logger *sl
 	return nil
 }
 
-// MergeFileChunks 按发送端指定的顺序合并分片（修复单分片同名覆盖问题，简化重命名逻辑）
+// MergeFileChunks merges chunks in sender-specified order (fixes single chunk overwrite, simplifies rename)
 func MergeFileChunks(cfg ChunkMergeConfig, pre string, logger *slog.Logger) error {
-	// 1. 参数校验
+	// 1. Validate parameters
 	if cfg.BaseDir == "" || cfg.FinalFileName == "" || len(cfg.ChunkNames) == 0 {
 		logger.Error("MergeFileChunks invalid config", slog.String("pre", pre), slog.Any("cfg", cfg))
 		return os.ErrInvalid
 	}
 
-	// 2. 构建最终文件路径
+	// 2. Build final file path
 	finalPath := filepath.Join(cfg.BaseDir, cfg.FinalFileName)
 
-	// 3. 处理单分片特殊场景（核心修复点）
+	// 3. Handle single chunk special case (core fix)
 	if len(cfg.ChunkNames) == 1 {
 		chunkName := cfg.ChunkNames[0]
 		chunkPath := filepath.Join(cfg.BaseDir, chunkName)
 
-		// 检查分片是否存在
+		// Check if chunk exists
 		if _, err := os.Stat(chunkPath); os.IsNotExist(err) {
 			logger.Error("MergeFileChunks chunk not exist", slog.String("pre", pre),
 				slog.Int("mergeOrder", 0),
@@ -207,31 +207,31 @@ func MergeFileChunks(cfg ChunkMergeConfig, pre string, logger *slog.Logger) erro
 			return err
 		}
 
-		// 如果分片名和最终文件名一致 → 无需复制，直接返回
+		// If chunk name matches final file name → no copy needed, return directly
 		if chunkName == cfg.FinalFileName {
 			logger.Info("MergeFileChunks single chunk match final name, skip merge",
 				slog.String("pre", pre), slog.String("finalPath", finalPath))
 			return nil
 		}
 
-		// 如果分片名和最终文件名不同 → 直接重命名（仅告警失败，不降级copy）
+		// If chunk name differs from final file name → rename directly (only warn on failure, no fallback to copy)
 		if err := os.Rename(chunkPath, finalPath); err != nil {
 			logger.Error("MergeFileChunks rename single chunk failed",
 				slog.String("pre", pre),
 				slog.String("from", chunkPath),
 				slog.String("to", finalPath),
 				slog.Any("err", err))
-			return err // 重命名失败直接返回错误，不继续处理
+			return err // Rename failed, return error directly, no further processing
 		}
 
-		// 重命名成功且配置了删除分片 → 无需额外删除（重命名后原文件已不存在）
+		// Rename succeeded and delete chunks configured → no extra deletion needed (original file no longer exists after rename)
 		logger.Info("MergeFileChunks rename single chunk success",
 			slog.String("pre", pre), slog.String("from", chunkPath), slog.String("to", finalPath))
 		logger.Info("MergeFileChunks success (single chunk)", slog.String("pre", pre), slog.String("finalPath", finalPath))
 		return nil
 	}
 
-	// 4. 多分片场景（保留原有逻辑）
+	// 4. Multi-chunk scenario (keep existing logic)
 	finalFile, err := os.Create(finalPath)
 	if err != nil {
 		logger.Error("MergeFileChunks create final file failed", slog.String("pre", pre),

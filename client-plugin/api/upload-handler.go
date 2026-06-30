@@ -24,10 +24,10 @@ var (
 	LocalBaseDir string
 )
 
-// ---------------------- 核心封装函数：Header解析+全量校验+构造UploadInfo ----------------------
-// ParseHeadersAndBuildUploadInfo 一站式处理请求头解析、校验、UploadInfo构造
-// 入参：Gin上下文、日志前缀、日志器
-// 出参：构造好的UploadInfo / 是否已向客户端返回响应（避免重复响应）/ 错误信息
+// ---------------------- Core wrapper: Header parsing + full validation + UploadInfo construction ----------------------
+// ParseHeadersAndBuildUploadInfo one-stop request header parsing, validation, UploadInfo construction
+// Input: Gin context, log prefix, logger
+// Output: constructed UploadInfo / whether response has been sent to client / error
 func ParseHeadersAndBuildUploadInfo(c *gin.Context, pre string,
 	logger *slog.Logger) (base.UploadStruct, int64, error) {
 
@@ -62,64 +62,64 @@ func ParseHeadersAndBuildUploadInfo(c *gin.Context, pre string,
 	return req, fileSize, nil
 }
 
-// V2ClientUploadHandler V2版本客户端直传文件处理器
-// 核心流程：解析上传请求头 -> 直接调用客户端直传逻辑上传文件 -> 返回上传结果
-// 区别于V1代理上传：无需调用B服务获取路由，直接完成文件上传
+// V1ClientUploadHandler V1 client direct upload file handler
+// Core flow: parse upload request headers -> directly call client upload logic -> return upload result
+// Differs from V1 proxy upload: no need to call service B for routing, uploads file directly
 func V1ClientUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 生成5位随机字符串作为请求唯一标识，用于日志追踪
+		// Generate 5 random letters as unique request ID for log tracking
 		requestID := util.GenerateRandomLetters(5)
 		logger.Info("V2ClientUploadHandler start", slog.String("requestID", requestID))
 
-		// 1. 解析请求头信息，构建上传所需的基础信息（文件名、存储路径、客户端信息等）
-		// 返回值说明：uploadInfo-上传核心信息；_（忽略值）-扩展字段；err-解析错误
+		// 1. Parse request headers to build basic upload info (file name, storage path, client info, etc.)
+		// Return values: uploadInfo-upload core info; _ (ignored)-extended field; err-parse error
 		uploadInfo, fileSize, err := ParseHeadersAndBuildUploadInfo(c, requestID, logger)
 		if err != nil {
-			return // 错误已在ParseHeadersAndBuildUploadInfo内部处理并返回响应
+			return // Error already handled inside ParseHeadersAndBuildUploadInfo with response returned
 		}
 
-		// 2. 调用客户端直传实现上传文件到存储服务（C服务）
-		// UploadDirectImp：客户端直传实现（区别于V1的代理转发实现）
-		// 参数说明：uploadInfo-上传信息；UploadDirectImp-直传实现函数；true-是否开启并发；requestID-请求标识；logger-日志实例
+		// 2. Call client direct upload to upload file to storage service (service C)
+		// UploadDirectImp: client direct upload implementation (differs from V1 proxy forwarding)
+		// Parameters: uploadInfo-upload info; UploadDirectImp-direct upload function; true-enable concurrency; requestID-request ID; logger-log instance
 		if err := upload.UploadFunc(true, fileSize, uploadInfo, upload.DirectImp,
 			upload.RoutingInfo{}, false, requestID, logger); err != nil {
 			logger.Error("client direct upload failed", slog.String("requestID", requestID),
 				slog.Any("err", err))
-			// 返回500内部错误，携带具体错误信息
+			// Return 500 internal error with specific error message
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		// 3. 上传成功，返回标准化响应
+		// 3. Upload success, return standardized response
 		logger.Info("V2ClientUploadHandler success", slog.String("requestID", requestID),
 			slog.String("fileName", uploadInfo.File.FileName),
 			slog.String("objectName", uploadInfo.File.NewFileName))
 		c.JSON(http.StatusOK, gin.H{
-			"message":    "upload by client success",  // 客户端直传成功提示
-			"file_name":  uploadInfo.File.FileName,    // 原始文件名
-			"objectName": uploadInfo.File.NewFileName, // 存储后的对象名（可能是重命名后的名称）
+			"message":    "upload by client success",  // Client direct upload success message
+			"file_name":  uploadInfo.File.FileName,    // Original file name
+			"objectName": uploadInfo.File.NewFileName, // Stored object name (may be renamed)
 		})
 	}
 }
 
-// V1ProxyUploadHandler 代理上传核心处理器
-// 流程：解析请求 -> 调用B服务获取路由 -> 上传文件到C服务 -> 返回响应
+// V1ProxyUploadHandler proxy upload core handler
+// Flow: parse request -> call service B for routing -> upload file to service C -> return response
 func V1ProxyUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 生成请求唯一标识，用于日志追踪
+		// Generate unique request ID for log tracking
 		pre := c.GetHeader("X-Pre")
 		if len(pre) <= 0 {
 			pre = util.GenerateRandomLetters(5)
 		}
 		logger.Info("V1ProxyUploadHandler start", slog.String("pre", pre))
 
-		// 1. 解析请求头和请求体，构建上传基础信息
+		// 1. Parse request headers and body, build basic upload info
 		uploadInfo, fileSize, err := ParseHeadersAndBuildUploadInfo(c, pre, logger)
 		if err != nil {
-			return // 错误已在ParseHeadersAndBuildUploadInfo内部处理并返回响应
+			return // Error already handled inside ParseHeadersAndBuildUploadInfo with response returned
 		}
 
-		// 2. 调用B服务获取路由信息
+		// 2. Call service B to get routing info
 		routingInfo, err := getRoutingInfoFromServiceControlPlane(uploadInfo, pre, logger)
 		if err != nil {
 			handleError(c, logger, pre, http.StatusInternalServerError, "get routing info failed", err)
@@ -130,14 +130,14 @@ func V1ProxyUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 
-		// 3. 上传文件到C服务
+		// 3. Upload file to service C
 		if err := upload.UploadFunc(false, fileSize, uploadInfo, upload.RedirectImp,
 			routingInfo, false, pre, logger); err != nil {
 			handleError(c, logger, pre, http.StatusInternalServerError, "upload to service C failed", err)
 			return
 		}
 
-		// 4. 返回成功响应
+		// 4. Return success response
 		logger.Info("V1ProxyUploadHandler success", slog.String("pre", pre),
 			slog.String("fileName", uploadInfo.File.FileName),
 			slog.String("objectName", uploadInfo.File.NewFileName))
@@ -149,11 +149,11 @@ func V1ProxyUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 	}
 }
 
-// getRoutingInfoFromServiceB 调用B服务获取路由信息
+// getRoutingInfoFromServiceControlPlane calls the control plane to get routing info
 func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre string,
 	logger *slog.Logger) (upload.RoutingInfo, error) {
 
-	// 构建调用B服务的请求
+	// Build request to call service B
 	reqBodyBytes, err := json.Marshal(uploadInfo.EndPoints)
 	if err != nil {
 		logger.Error("marshal endpoints failed", slog.String("pre", pre), slog.Any("err", err))
@@ -166,12 +166,12 @@ func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre str
 		return upload.RoutingInfo{}, err
 	}
 
-	// 设置请求头
+	// Set request headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(util.HeaderFileName, uploadInfo.File.NewFileName)
 	req.Header.Set("X-Pre", pre)
 
-	// 发送请求到B服务
+	// Send request to service B
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -180,7 +180,7 @@ func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre str
 	}
 	defer resp.Body.Close()
 
-	// 读取B服务响应
+	// Read service B response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		logger.Error("read service B response failed", slog.String("pre", pre),
@@ -189,12 +189,12 @@ func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre str
 	}
 
 	type ApiResponse struct {
-		Code int         `json:"code"` // 200=成功，400=参数错误，500=服务端错误
-		Msg  string      `json:"msg"`  // 提示信息
-		Data interface{} `json:"data"` // 业务数据
+		Code int         `json:"code"` // 200=success, 400=bad request, 500=server error
+		Msg  string      `json:"msg"`  // Message
+		Data interface{} `json:"data"` // Business data
 	}
 
-	// 解析B服务响应
+	// Parse service B response
 	var apiResp ApiResponse
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		logger.Error("unmarshal service B response failed", slog.String("pre", pre),
@@ -202,7 +202,7 @@ func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre str
 		return upload.RoutingInfo{}, err
 	}
 
-	// 解析路由信息
+	// Parse routing info
 	reqDataBytes, err := json.Marshal(apiResp.Data)
 	if err != nil {
 		logger.Error("marshal routing data failed", slog.String("pre", pre), slog.Any("err", err))
@@ -221,7 +221,7 @@ func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre str
 	return routingInfo, nil
 }
 
-// handleError 统一错误处理：记录日志并返回标准化响应
+// handleError unified error handling: log and return standardized response
 func handleError(c *gin.Context, logger *slog.Logger, pre string, statusCode int, msg string, err error) {
 	errMsg := msg
 	if err != nil {

@@ -1,9 +1,9 @@
-# Rigel: Global Cross-Cloud Bulk Data Transfer Platform
+# SkyFlow: Global Cross-Cloud Bulk Data Transfer Platform
 
-![Service Architecture of the Rigel Platform](service-architecture.png)
+![Service Architecture of the SkyFlow Platform](service-architecture.png)
 
 ## Overview
-Rigel is a high-performance bulk data transfer platform built on a global cross-cloud network, designed to address the key pain points of existing cloud-based data transfer solutions: high costs, single-cloud lock-in, and poor scalability across providers.
+SkyFlow is a high-performance bulk data transfer platform built on a global cross-cloud network, designed to address the key pain points of existing cloud-based data transfer solutions: high costs, single-cloud lock-in, and poor scalability across providers.
 
 The platform is optimized for cloud-based analytics, storage, and media services, with core innovations in dynamic routing and elastic scaling to ensure stable, high-throughput data transfer even under resource saturation.
 
@@ -29,7 +29,7 @@ Existing bulk data transfer solutions suffer from:
 - **Benefit**: Alleviates system bottlenecks and maintains smooth, high-throughput data flow during bulk transfers.
 
 ### 3. Cross-Cloud Architecture Foundation
-Rigel's underlying architecture enables global cross-cloud deployment:
+SkyFlow's underlying architecture enables global cross-cloud deployment:
 #### Two-Level Resource Abstraction
 - **Virtual Machines (VMs)**: Fundamental execution unit for data forwarding and network measurement (e.g., `instance-20260202-081825`).
 - **Nodes**: Grouped VMs mapping to cloud regions or availability zones (e.g., `europe-west4-b`), acting as the basic unit for resource management and scheduling.
@@ -37,7 +37,7 @@ Rigel's underlying architecture enables global cross-cloud deployment:
 #### Decoupled Control–Data Plane
 - **Control Plane**: Deployed at node level, responsible for Lyapunov-based routing optimization and elastic scaling decisions.
 - **Data Plane**: Deployed at VM level, running `data-plane` (resource metrics collection/network probing) and `data-proxy` (actual file forwarding/proxying) services.
-- **Edge Client**: `rigel-client` manages file chunking and multi-path parallel transmission for bulk data at the system edge.
+- **Edge Client**: `client-plugin` manages file chunking and multi-path parallel transmission for bulk data at the system edge.
 
 #### Horizontal State Synchronization
 - Distributed state sync across control-plane instances eliminates centralized bottlenecks, enabling independent routing decisions and enhancing robustness in large-scale deployments.
@@ -47,15 +47,15 @@ Rigel's underlying architecture enables global cross-cloud deployment:
 ## Implementation Architecture Diagram
 The end-to-end architecture for bulk data transfer is shown below:
 
-![Rigel Bulk Data Transfer Architecture](implementation.png)
+![SkyFlow Bulk Data Transfer Architecture](implementation.png)
 
 ### Figure Caption
-**Rigel bulk data transfer architecture**, illustrating the cross-cloud two-level resource abstraction (VMs and nodes) and decoupled control–data plane design. The control plane leverages Lyapunov-based Universal Max-Weight routing and backpressure-aware elastic scaling, while the data plane ensures high-throughput bulk data forwarding. Horizontal state synchronization enables resilient, global cross-cloud data transfer across major cloud providers.
+**SkyFlow bulk data transfer architecture**, illustrating the cross-cloud two-level resource abstraction (VMs and nodes) and decoupled control–data plane design. The control plane leverages Lyapunov-based Universal Max-Weight routing and backpressure-aware elastic scaling, while the data plane ensures high-throughput bulk data forwarding. Horizontal state synchronization enables resilient, global cross-cloud data transfer across major cloud providers.
 
 ---
 
 ## Performance Results (under Different Network Setups)
-Deployed across multiple major cloud providers, Rigel delivers significant improvements over open-source tools and commercial services:
+Deployed across multiple major cloud providers, SkyFlow delivers significant improvements over open-source tools and commercial services:
 - **Cost Reduction**: Reduces bandwidth costs by up to x%.
 - **Transfer Speed**: Achieves up to y× faster replication for bulk data.
 - **Stability**: Maintains high utilization and throughput even under saturated network links.
