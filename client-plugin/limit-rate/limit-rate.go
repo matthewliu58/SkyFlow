@@ -14,7 +14,7 @@ type RateLimitedReader struct {
 
 func (rr *RateLimitedReader) Read(p []byte) (int, error) {
 	if rr.limiter != nil {
-		// 按本次要读的字节数限流
+		// Rate limit by the number of bytes to be read this time
 		if err := rr.limiter.WaitN(rr.ctx, len(p)); err != nil {
 			return 0, err
 		}

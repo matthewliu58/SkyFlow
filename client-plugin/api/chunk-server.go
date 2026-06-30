@@ -173,7 +173,7 @@ func SaveFileChunk(chunkFile io.Reader, chunkPath string, pre string, logger *sl
 	defer chunkOutFile.Close()
 
 	// 流式写入（支持大文件）
-	if _, err := io.Copy(chunkOutFile, chunkFile); err != nil {
+	if _, err = io.Copy(chunkOutFile, chunkFile); err != nil {
 		logger.Error("SaveFileChunk write chunk failed", slog.String("pre", pre),
 			slog.String("chunkPath", chunkPath), slog.Any("err", err))
 		return err
