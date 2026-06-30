@@ -13,14 +13,14 @@ import (
 func RedirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 	rateLimiter *rate.Limiter, inMemory bool, pre string, logger *slog.Logger) error {
 
-	//todo 内部触发重新 routing
+	//todo internally trigger re-routing
 
 	logger.Info("UploadRedirectImp", slog.String("pre", pre), slog.Any("task", task))
 
-	// 先获取当前分片的基础信息（避免空指针）
+	// First get the basic info of current chunk (avoid null pointer)
 	chunkVal, ok := task.Chunks.Get(task.Index)
 	if !ok {
-		err := fmt.Errorf("chunk index %d not found in Chunks map", task.Index)
+		err := fmt.Errorf("chunk index %s not found in Chunks map", task.Index)
 		logger.Error("get chunk failed", slog.String("pre", pre), slog.Any("err", err))
 		return err
 	}
@@ -28,12 +28,12 @@ func RedirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 
 	startTime := time.Now()
 	chunk.LastSend = startTime
-	chunk.Acked = int(ChunkStatusTransferring) // 1=开始传输
+	chunk.Acked = int(ChunkStatusTransferring) // 1=transferring
 	task.Chunks.Set(task.Index, chunk)
 	logger.Info("set chunk initial state", slog.String("pre", pre), slog.String("index", task.Index),
 		slog.Int("acked", 1))
 
-	// 定义defer函数：异常时统一设置Acked=0（兜底）
+	// Define defer function: set Acked to failure on error (fallback)
 	var finalErr error
 	defer func() {
 		if finalErr != nil {
@@ -45,9 +45,9 @@ func RedirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 		}
 	}()
 
-	//获取Reader（读取源文件）
+	// Get Reader (read source file)
 	ctx := task.Ctx
-	// 核心修改1：先检查ctx是否已取消，避免无效操作
+	// Core fix 1: check if ctx is canceled first, avoid invalid operations
 	select {
 	case <-ctx.Done():
 		finalErr = fmt.Errorf("ctx canceled before get reader: %w", ctx.Err())
@@ -66,11 +66,11 @@ func RedirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 	}
 	defer func() {
 		if reader != nil {
-			_ = reader.Close() // 确保Reader关闭，无论成功/失败
+			_ = reader.Close() // Ensure Reader is closed regardless of success/failure
 		}
 	}()
 
-	// 上传到目标端
+	// Upload to target
 	select {
 	case <-ctx.Done():
 		finalErr = fmt.Errorf("ctx canceled before upload: %w", ctx.Err())
@@ -94,7 +94,7 @@ func RedirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 	}
 	logger.Info("UploadFile success, _Time", slog.String("pre", pre), slog.String("objectName", task.ObjectName))
 
-	// 新状态前最后检查
+	// Final check before new status
 	select {
 	case <-ctx.Done():
 		finalErr = fmt.Errorf("ctx canceled before update success state: %w", ctx.Err())

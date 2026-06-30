@@ -13,12 +13,12 @@ import (
 func DirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 	rateLimiter *rate.Limiter, inMemory bool, pre string, logger *slog.Logger) error {
 
-	logger.Info("UploadDirectImp", slog.String("pre", pre), slog.String("index", task.Index)) // 优化：只打印index，避免task序列化过大
+	logger.Info("UploadDirectImp", slog.String("pre", pre), slog.String("index", task.Index)) // Optimization: only print index, avoid large task serialization
 
-	// 先获取当前分片的基础信息（避免空指针）
+	// First get the basic info of current chunk (avoid null pointer)
 	chunkVal, ok := task.Chunks.Get(task.Index)
 	if !ok {
-		err := fmt.Errorf("chunk index %s not found in Chunks map", task.Index) // 修正：Index是string，不是int
+		err := fmt.Errorf("chunk index %s not found in Chunks map", task.Index) // Fix: Index is string, not int
 		logger.Error("get chunk failed", slog.String("pre", pre), slog.Any("err", err))
 		return err
 	}
@@ -29,19 +29,19 @@ func DirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 		return err
 	}
 
-	// 初始状态：标记为开始传输（Acked=1）
+	// Initial state: mark as transferring (Acked=1)
 	startTime := time.Now()
 	chunk.LastSend = startTime
-	chunk.Acked = int(ChunkStatusTransferring) // 1=开始传输
+	chunk.Acked = int(ChunkStatusTransferring) // 1=transferring
 	task.Chunks.Set(task.Index, chunk)
 	logger.Info("set chunk initial state", slog.String("pre", pre),
 		slog.String("index", task.Index), slog.Int("acked", 1))
 
-	// 定义defer函数：异常时统一设置Acked=0（兜底）
+	// Define defer function: set Acked to failure on error (fallback)
 	var finalErr error
 	defer func() {
 		if finalErr != nil {
-			// 出错时：更新状态为失败（Acked=0）
+			// On error: update status to failed
 			chunk.LastSend = startTime
 			chunk.Acked = int(ChunkStatusTransferFailed)
 			task.Chunks.Set(task.Index, chunk)
@@ -50,7 +50,7 @@ func DirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 		}
 	}()
 
-	// 获取Reader
+	// Get Reader
 	ctx := task.Ctx
 
 	select {
@@ -72,14 +72,14 @@ func DirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 	}
 	defer func() {
 		if reader != nil {
-			_ = reader.Close() // 确保Reader关闭，无论成功/失败
+			_ = reader.Close() // Ensure Reader is closed regardless of success/failure
 		}
 	}()
 
 	logger.Info("download object success_Time", slog.String("pre", pre),
 		slog.String("objectName", task.ObjectName), slog.Time("time", time.Now()))
 
-	// 上传到目标端
+	// Upload to target
 	select {
 	case <-ctx.Done():
 		finalErr = fmt.Errorf("ctx canceled before upload: %w", ctx.Err())
@@ -103,7 +103,7 @@ func DirectImp(fo base.FileOperateInterfaces, task ChunkTask, hops string,
 			slog.String("index", task.Index))
 	}
 
-	//成功状态更新（Acked=2）
+	// Success status update (Acked=2)
 	select {
 	case <-ctx.Done():
 		finalErr = fmt.Errorf("ctx canceled before update success state: %w", ctx.Err())

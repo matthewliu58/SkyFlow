@@ -35,9 +35,9 @@ const (
 const (
 	MaxConcurrency          = 10
 	QueueBufferSize         = 100
-	CheckInterval           = 2 * time.Second // 分块超时检查间隔
-	ChunkExpireTime         = 2 * time.Minute // 分块超时重传阈值
-	UploadTimeout           = 5 * time.Minute // 整体上传超时时间
+	CheckInterval           = 2 * time.Second // Chunk timeout check interval
+	ChunkExpireTime         = 2 * time.Minute // Chunk expire retransmission threshold
+	UploadTimeout           = 5 * time.Minute // Overall upload timeout duration
 	TaskSubmitRetryInterval = 1 * time.Second
 	ChunkSubmitDelay        = 100 * time.Millisecond
 	ChunkSizeInMemory       = 512 * 1024 * 1024 // 512MB
@@ -51,17 +51,17 @@ const (
 )
 
 type ChunkEvent struct {
-	Type    ChunkEventType               // 事件类型
-	Indexes map[string]*split.ChunkState // 超时分块索引
+	Type    ChunkEventType               // Event type
+	Indexes map[string]*split.ChunkState // Expired chunk indexes
 }
 
 type ChunkTask struct {
-	Ctx        context.Context // 带requestID的上下文
+	Ctx        context.Context // Context with request ID
 	Index      string
 	Chunks     *util.SafeMap
 	ObjectName string
 	Upload     base.UploadStruct
-	Pre        string // 保留原有pre入参，完全兼容
+	Pre        string // Preserve original pre parameter, fully compatible
 }
 
 type PathInfo struct {
@@ -76,34 +76,34 @@ type RoutingInfo struct {
 
 type WorkerPool struct {
 	TaskCh chan ChunkTask
-	cancel func() // 新增：协程池退出信号
+	cancel func() // New: goroutine pool exit signal
 }
 
-// -------------------------- 6. 核心函数 --------------------------
+// -------------------------- 6. Core functions --------------------------
 
-// StartChunkTimeoutChecker 保留pre入参，同时用上下文透传，新增全局超时控制
-// 参数新增：
+// StartChunkTimeoutChecker preserves pre parameter, uses context propagation, adds global timeout control
+// New parameter:
 //
-//	globalTimeout - 检查器整体运行超时时间（0表示不限制，仅靠ctx控制）
+//	globalTimeout - overall checker timeout duration (0 means no limit, controlled only by ctx)
 func StartChunkTimeoutChecker(
 	ctx context.Context,
 	s *util.SafeMap,
 	interval time.Duration,
 	expire time.Duration,
-	globalTimeout time.Duration, // 新增：检查器整体超时时间
+	globalTimeout time.Duration, // New: overall checker timeout duration
 	events chan<- ChunkEvent,
-	pre string, // 保留原有pre入参
+	pre string, // Preserve original pre parameter
 	logger *slog.Logger,
 ) {
 
-	// 2. 构建带全局超时的上下文（核心修复：添加超时控制）
+	// 2. Build context with global timeout (core fix: add timeout control)
 	var cancel func()
 	if globalTimeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, globalTimeout)
-		defer cancel() // 确保超时/退出时释放资源
+		defer cancel() // Ensure resource release on timeout/exit
 	}
 
-	// 3. 初始化定时器
+	// 3. Initialize ticker
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -113,18 +113,18 @@ func StartChunkTimeoutChecker(
 		slog.Duration("expire", expire),
 		slog.Duration("global_timeout", globalTimeout))
 
-	// 4. 循环逻辑：增加全局超时退出分支
+	// 4. Loop logic: add global timeout exit branch
 	for {
 		select {
 		case <-ticker.C:
 			expired, finished, hasInitSendingChunk := CollectExpiredChunks(s, expire, pre, logger)
 
-			// 原有业务逻辑：检查分片状态并发送事件
+			// Original business logic: check chunk status and send events
 			if !hasInitSendingChunk {
 				if finished {
 					events <- ChunkEvent{Type: ChunkFinished}
 					logger.Info("Chunk checker exit: all chunks finished", slog.String("pre", pre))
-					return // 正常退出
+					return // Normal exit
 				}
 				if len(expired) > 0 {
 					events <- ChunkEvent{Type: ChunkExpired, Indexes: expired}
@@ -135,7 +135,7 @@ func StartChunkTimeoutChecker(
 			}
 
 		case <-ctx.Done():
-			// 上下文结束（超时/手动取消），退出循环
+			// Context ended (timeout/manual cancel), exit loop
 			err := ctx.Err()
 			if errors.Is(err, context.DeadlineExceeded) {
 				logger.Warn("Chunk checker exit: global timeout reached",
@@ -146,21 +146,21 @@ func StartChunkTimeoutChecker(
 					slog.String("pre", pre),
 					slog.Any("err", err))
 			}
-			return // 超时/取消退出
+			return // Timeout/cancel exit
 		}
 	}
 }
 
-// CollectExpiredChunks 保留pre入参，状态枚举替换Acked
+// CollectExpiredChunks preserves pre parameter, replaces Acked with status enum
 func CollectExpiredChunks(
 	s *util.SafeMap,
 	expire time.Duration,
-	pre string, // 保留pre入参
+	pre string, // Preserve pre parameter
 	logger *slog.Logger,
 ) (expired map[string]*split.ChunkState, finished, hasInitSendingChunk bool) {
 	now := time.Now()
 	expired = make(map[string]*split.ChunkState)
-	finished = true // 先假设都 ack 了
+	finished = true // Assume all are acked initially
 
 	logger.Info("CollectExpiredChunks", slog.String("pre", pre),
 		slog.Any("now", now), slog.Any("expire", expire))
@@ -172,10 +172,10 @@ func CollectExpiredChunks(
 			continue
 		}
 
-		// 核心改造：用枚举替代原Acked数值判断
+		// Core refactor: use enum instead of raw Acked numeric check
 		status := ChunkStatus(v_.Acked)
 
-		//还没发送完不能resubmit
+		// Cannot resubmit before initial transmission completes
 		if status == ChunkStatusInit {
 			logger.Warn("Resubmit rejected, initial transmission is still in progress",
 				slog.String("pre", pre), slog.String("index", v_.Index))
@@ -183,7 +183,7 @@ func CollectExpiredChunks(
 		}
 
 		if status == ChunkStatusTransferring || status == ChunkStatusTransferFailed {
-			finished = false // 只要发现一个没 ack，就没完成
+			finished = false // If any is not acked, it's not finished
 			if !v_.LastSend.IsZero() && now.Sub(v_.LastSend) > expire {
 				expired[v_.Index] = v_
 			}
@@ -193,37 +193,37 @@ func CollectExpiredChunks(
 	return expired, finished, false
 }
 
-// NewWorkerPool 保留pre入参，上下文透传 + 新增取消逻辑
+// NewWorkerPool preserves pre parameter, context propagation + new cancel logic
 func NewWorkerPool(
 	fo base.FileOperateInterfaces,
 	queueSize int,
 	routingInfo RoutingInfo,
 	handler func(base.FileOperateInterfaces, ChunkTask, string, *rate.Limiter, bool, string, *slog.Logger) error,
 	inMemory bool,
-	pre string, // 保留pre入参
+	pre string, // Preserve pre parameter
 	logger *slog.Logger,
 ) *WorkerPool {
 	taskCh := make(chan ChunkTask, queueSize)
-	// 新增：创建取消上下文，用于终止协程池
+	// New: create cancel context for stopping worker pool
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &WorkerPool{
 		TaskCh: taskCh,
-		cancel: cancel, // 保存取消函数
+		cancel: cancel, // Save cancel function
 	}
 	logger.Info("NewWorkerPool", slog.String("pre", pre), "queueSize", queueSize)
 
-	// 提取通用 worker 执行函数，消除重复代码
+	// Extract common worker execution function, eliminate duplicate code
 	runWorker := func(workerID int, hops string, limiter *rate.Limiter, workerType string) {
 		logger.Info(fmt.Sprintf("Worker for %s init", workerType), slog.String("pre", pre), "worker", workerID,
 			slog.String("hops", hops), slog.Any("limiter", limiter))
 
 		for {
 			select {
-			case <-ctx.Done(): // 监听取消信号
+			case <-ctx.Done(): // Listen for cancel signal
 				logger.Info("Worker exit: context canceled", slog.String("pre", pre), "worker", workerID)
 				return
-			case task, ok := <-taskCh: // 监听任务通道（关闭时ok=false）
+			case task, ok := <-taskCh: // Listen on task channel (ok=false when closed)
 				if !ok {
 					logger.Info("Worker exit: task channel closed", slog.String("pre", pre), "worker", workerID)
 					return
@@ -235,7 +235,7 @@ func NewWorkerPool(
 					hops,
 					limiter,
 					inMemory,
-					pre, // 传递pre入参
+					pre, // Pass pre parameter
 					logger,
 				)
 
@@ -250,12 +250,12 @@ func NewWorkerPool(
 
 	workerNum := len(routingInfo.Routing)
 	if workerNum <= 0 {
-		// direct 分支：hops为空，limiter为nil
+		// Direct branch: hops is empty, limiter is nil
 		for i := 0; i < MaxConcurrency; i++ {
 			go runWorker(i, "", nil, "direct")
 		}
 	} else {
-		// redirect 分支：初始化limiter和hops
+		// Redirect branch: initialize limiter and hops
 		rand.Seed(time.Now().UnixNano())
 		for i := 0; i < MaxConcurrency; i++ {
 			index := rand.Intn(workerNum)
@@ -269,15 +269,15 @@ func NewWorkerPool(
 	return p
 }
 
-// Stop 新增：终止协程池（关闭任务通道 + 取消上下文）
+// Stop is new: terminates the worker pool (close task channel + cancel context)
 func (p *WorkerPool) Stop() {
 	if p.cancel != nil {
-		p.cancel() // 触发所有worker的ctx.Done()
+		p.cancel() // Trigger ctx.Done() for all workers
 	}
-	close(p.TaskCh) // 关闭任务通道
+	close(p.TaskCh) // Close task channel
 }
 
-// ChunkEventLoop 保留pre入参，状态枚举替换Acked + 监听取消信号
+// ChunkEventLoop preserves pre parameter, status enum replaces Acked + listen for cancel signal
 func ChunkEventLoop(ctx context.Context, fo base.FileOperateInterfaces, upload base.UploadStruct,
 	chunks *util.SafeMap, workerPool *WorkerPool, events <-chan ChunkEvent, done chan struct{}, inMemory bool,
 	pre string, logger *slog.Logger) {
@@ -286,7 +286,7 @@ func ChunkEventLoop(ctx context.Context, fo base.FileOperateInterfaces, upload b
 
 	for {
 		select {
-		case ev, ok := <-events: // 监听事件通道（关闭时ok=false）
+		case ev, ok := <-events: // Listen on events channel (ok=false when closed)
 			if !ok {
 				logger.Info("ChunkEventLoop exit: events channel closed", slog.String("pre", pre))
 				close(done)
@@ -309,7 +309,7 @@ func ChunkEventLoop(ctx context.Context, fo base.FileOperateInterfaces, upload b
 						continue
 					}
 
-					// 用枚举判断状态
+					// Use enum to check status
 					if ChunkStatus(v_.Acked) != ChunkStatusCompleted {
 						logger.Error("upload failed", slog.String("pre", pre),
 							slog.String("fileName", upload.File.NewFileName), "index", v_.Index)
@@ -342,7 +342,7 @@ func ChunkEventLoop(ctx context.Context, fo base.FileOperateInterfaces, upload b
 				return
 			}
 
-		case <-ctx.Done(): // 监听主上下文取消信号（超时/手动终止）
+		case <-ctx.Done(): // Listen for main context cancel signal (timeout/manual termination)
 			logger.Info("ChunkEventLoop exit: context canceled", slog.String("pre", pre), "err", ctx.Err())
 			close(done)
 			return
@@ -350,18 +350,18 @@ func ChunkEventLoop(ctx context.Context, fo base.FileOperateInterfaces, upload b
 	}
 }
 
-// Submit 保留原有逻辑，兼容pre
+// Submit preserves original logic, compatible with pre
 func (p *WorkerPool) Submit(task ChunkTask) bool {
 	select {
 	case p.TaskCh <- task:
 		return true
 	default:
-		// 队列满了，可以选择丢 / 打日志 / 统计
+		// Queue is full, can choose to drop / log / count
 		return false
 	}
 }
 
-// StartChunkSubmitLoop 保留pre入参，状态枚举判断 + 监听取消信号
+// StartChunkSubmitLoop preserves pre parameter, status enum check + listen for cancel signal
 func StartChunkSubmitLoop(
 	ctx context.Context,
 	chunks *util.SafeMap,
@@ -369,14 +369,14 @@ func StartChunkSubmitLoop(
 	uploadInfo base.UploadStruct,
 	resubmit bool,
 	resubmitIndexes map[string]*split.ChunkState,
-	pre string, // 保留pre入参
+	pre string, // Preserve pre parameter
 	logger *slog.Logger,
 ) {
 	logger.Info("StartChunkSubmitLoop", slog.String("pre", pre), "fileName", uploadInfo.File.NewFileName)
 	chunks_ := chunks.GetAll()
 
 	for _, v := range chunks_ {
-		// 每次循环都检查上下文是否取消，避免无效提交
+		// Check context cancellation on each loop iteration, avoid invalid submissions
 		select {
 		case <-ctx.Done():
 			logger.Info("StartChunkSubmitLoop exit: context canceled", slog.String("pre", pre))
@@ -390,7 +390,7 @@ func StartChunkSubmitLoop(
 			continue
 		}
 
-		// 用枚举判断状态
+		// Use enum to check status
 		status := ChunkStatus(v_.Acked)
 		if resubmit {
 			if _, ok := resubmitIndexes[v_.Index]; !ok || status == ChunkStatusCompleted {
@@ -408,7 +408,7 @@ func StartChunkSubmitLoop(
 			Chunks:     chunks,
 			ObjectName: v_.ObjectName,
 			Upload:     uploadInfo,
-			Pre:        pre, // 赋值pre字段
+			Pre:        pre, // Assign pre field
 		}
 
 		if !workerPool.Submit(task) {
@@ -422,7 +422,7 @@ func StartChunkSubmitLoop(
 func UploadFunc_(
 	clientB bool,
 	us base.UploadStruct,
-	pre string, // 保留原有pre入参
+	pre string, // Preserve original pre parameter
 	logger *slog.Logger) base.FileOperateInterfaces {
 
 	logger.Info("UploadFunc_", slog.String("pre", pre), slog.Any("us", us))
@@ -431,7 +431,7 @@ func UploadFunc_(
 	return fo
 }
 
-// Upload 核心入口：保留pre入参，上下文透传 + 统一取消所有goroutine
+// Upload is the core entry point: preserves pre parameter, context propagation + unified cancel all goroutines
 func UploadFunc(
 	clientB bool,
 	fileSize int64,
@@ -439,22 +439,22 @@ func UploadFunc(
 	handler func(base.FileOperateInterfaces, ChunkTask, string, *rate.Limiter, bool, string, *slog.Logger) error,
 	routing RoutingInfo,
 	noSplitB bool,
-	pre string, // 保留原有pre入参
+	pre string, // Preserve original pre parameter
 	logger *slog.Logger) error {
 
 	logger.Info("UploadFunc", slog.String("pre", pre), slog.Any("us", us))
 
-	// 核心修复1：创建带全局超时的可取消上下文（管控所有goroutine）
+	// Core fix 1: create cancelable context with global timeout (manage all goroutines)
 	ctx, cancel := context.WithTimeout(context.Background(), UploadTimeout)
 	defer func() {
-		cancel() // 无论正常/异常退出，都取消上下文
+		cancel() // Cancel context regardless of normal/abnormal exit
 		logger.Info("Upload context canceled", slog.String("pre", pre))
 	}()
 
-	// 1. 初始化接口
+	// 1. Initialize interface
 	fo := base.InitInterface(clientB, us, pre, logger)
 
-	// 3. 获取文件真实长度
+	// 3. Get actual file length
 	var err error
 	if fileSize <= 0 {
 		if fo.GetFileSize == nil {
@@ -470,7 +470,7 @@ func UploadFunc(
 	logger.Info("Get file size success", slog.String("pre", pre),
 		slog.Int64("size", fileSize))
 
-	// 4. 文件分块
+	// 4. Split file into chunks
 	chunks := util.NewSafeMap()
 	_, err = split.SplitFilebyRange(fileSize, us.File.FileStart, us.File.FileLength,
 		us.File.FileName, us.File.NewFileName, noSplitB, chunks, pre, logger)
@@ -488,20 +488,20 @@ func UploadFunc(
 	//In-memory mode is enabled by default
 	inMemory := true
 
-	//启动定时重传 & check传输完毕
+	// Start periodic retransmission & check transfer completion
 	done := make(chan struct{})
 	events := make(chan ChunkEvent, QueueBufferSize)
-	// 启动超时检查器（传入带超时的ctx）
+	// Start timeout checker (pass ctx with timeout)
 	go StartChunkTimeoutChecker(ctx, chunks, CheckInterval, ChunkExpireTime, UploadTimeout, events, pre, logger)
 
-	//启动消费者 默认一个http并发度
+	// Start consumer, default one HTTP concurrency
 	workerPool := NewWorkerPool(fo, QueueBufferSize, routing, handler, inMemory, pre, logger)
-	defer workerPool.Stop() // 核心修复2：退出时终止协程池
+	defer workerPool.Stop() // Core fix 2: terminate worker pool on exit
 
-	//events 消费（传入带超时的ctx）
+	// Events consumer (pass ctx with timeout)
 	go ChunkEventLoop(ctx, fo, us, chunks, workerPool, events, done, inMemory, pre, logger)
 
-	// 4. 启动分片上传（传入带超时的ctx）
+	// 4. Start chunk upload (pass ctx with timeout)
 	go StartChunkSubmitLoop(ctx, chunks, workerPool, us, false, nil, pre, logger)
 
 	newFileName := us.File.NewFileName
@@ -509,7 +509,7 @@ func UploadFunc(
 	case <-done:
 		logger.Info("Function finished", slog.String("pre", pre), slog.String("newFileName", newFileName))
 	case <-ctx.Done():
-		// 超时/取消触发
+		// Timeout/cancel triggered
 		err := ctx.Err()
 		if errors.Is(err, context.DeadlineExceeded) {
 			logger.Warn("Timeout exit", slog.String("pre", pre), slog.String("newFileName", newFileName))
@@ -523,7 +523,7 @@ func UploadFunc(
 	return nil
 }
 
-// GetTransferReader 保留pre入参，上下文透传
+// GetTransferReader preserves pre parameter, context propagation
 func GetTransferReader(
 	ctx context.Context,
 	fo base.FileOperateInterfaces,
@@ -531,7 +531,7 @@ func GetTransferReader(
 	start, length int64,
 	objectName string,
 	inMemory bool,
-	pre string, // 保留pre入参
+	pre string, // Preserve pre parameter
 	logger *slog.Logger,
 ) (io.ReadCloser, error) {
 
