@@ -420,13 +420,13 @@ func StartChunkSubmitLoop(
 }
 
 func UploadFunc_(
-	cleintB bool,
+	clientB bool,
 	us base.UploadStruct,
 	pre string, // 保留原有pre入参
 	logger *slog.Logger) base.FileOperateInterfaces {
 
 	logger.Info("UploadFunc_", slog.String("pre", pre), slog.Any("us", us))
-	fo := base.InitInterface(cleintB, us, pre, logger)
+	fo := base.InitInterface(clientB, us, pre, logger)
 
 	return fo
 }

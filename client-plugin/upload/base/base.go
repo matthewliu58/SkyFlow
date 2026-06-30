@@ -147,7 +147,6 @@ func InitInterface(clientB bool, us UploadStruct, pre string, logger *slog.Logge
 			logger.Error("Extract AWS Dest Interface failed", slog.String("pre", pre))
 			return fo
 		}
-
 		if clientB {
 			fo.UploadFile = s3_client.NewUpload(us.Proxy.LocalDir, aws_.BucketName, aws_.Region,
 				aws_.AccessKey, aws_.SecretKey, aws_.Endpoint, aws_.UsePathStyle, pre, logger)

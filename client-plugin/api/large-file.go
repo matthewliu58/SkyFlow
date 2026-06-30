@@ -36,9 +36,7 @@ func V1ProxyLargeUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 		// Generate unique request ID for log tracking
 		pre := util.GenerateRandomLetters(5)
 		logger.Info("V1ProxyLargeUploadHandler start", slog.String("pre", pre))
-
 		processUploadLogic(c, false, pre, logger)
-
 		logger.Info("V1ProxyLargeUploadHandler end", slog.String("pre", pre))
 	}
 }
@@ -48,9 +46,7 @@ func V1ClientLargeUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 		// Generate unique request ID for log tracking
 		pre := util.GenerateRandomLetters(5)
 		logger.Info("V1ClientLargeUploadHandler start", slog.String("pre", pre))
-
 		processUploadLogic(c, true, pre, logger)
-
 		logger.Info("V1ClientLargeUploadHandler end", slog.String("pre", pre))
 	}
 }
