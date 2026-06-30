@@ -56,19 +56,19 @@ fi
 
 mkdir -p "$HOME/go"
 
-# ===== 立即生效 Go 环境（关键！不用再 source ~/.bashrc）=====
+# ==== Activate Go environment immediately (key! no need to source ~/.bashrc) ====
 export GOROOT=/usr/local/go
 export GOPATH=$HOME/go
 export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
 
-# ========== Rust 环境 ==========
+# ========== Rust environment ==========
 echo -e "\n==> Install Rust (Stable)"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-# 让 Rust 立即生效（关键！不用重启终端）
+# Activate Rust immediately (key! no need to restart terminal)
 source $HOME/.cargo/env
 
-# 写入环境变量到 bashrc（永久生效）
+# Persist env vars to bashrc (permanent)
 if ! grep -q ".cargo/env" "$BASHRC"; then
 cat << EOF >> "$BASHRC"
 
@@ -82,7 +82,7 @@ rustc --version
 cargo --version
 rustup --version
 
-# ========== 自动安装项目必需依赖 ==========
+# ========== Auto-install project dependencies ==========
 #echo -e "\n==> Install required Rust dependencies for data-proxy"
 #cargo add futures_util
 #cargo add bytes
@@ -91,7 +91,7 @@ rustup --version
 #cargo add tracing
 #cargo add hyper-tls
 
-# ===== 结束 =====
+# ===== Done =====
 echo -e "\n==> All installation done!"
-echo "Go  and Rust are ready!"
-echo "You can now run: cargo build  or  cargo build --release"
+echo "Go and Rust are ready!"
+echo "You can now run: cargo build or cargo build --release"

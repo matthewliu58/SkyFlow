@@ -11,57 +11,57 @@ else
 fi
 
 #==============================
-# Debian 12 跨洋大文件 BBR 优化脚本
-# 适用于 GCP / AWS 日 <-> 美大带宽传输
+# Debian 12 cross-ocean large-file BBR optimization
+# For GCP / AWS JP <-> US high-bandwidth transfer
 #==============================
 
-# 1. 写入 sysctl 内核优化（BBR + TCP + 缓冲区 + 队列）
+# 1. Write sysctl kernel tuning (BBR + TCP + buffers + queue)
 cat > /etc/sysctl.d/rigel-bbr-tuning.conf <<EOF
-# BBR 拥塞控制
+# BBR congestion control
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 
-# 文件句柄
+# File handles
 fs.file-max=1048576
 fs.nr_open=1048576
 
-# TCP 缓冲区最大值
+# TCP buffer max
 net.core.rmem_max=67108864
 net.core.wmem_max=67108864
 net.core.rmem_default=67108864
 net.core.wmem_default=67108864
 
-# 自动调整缓冲区
+# Auto-tune buffers
 net.ipv4.tcp_rmem=4096 87380 67108864
 net.ipv4.tcp_wmem=4096 87380 67108864
 
-# 端口范围
+# Port range
 net.ipv4.ip_local_port_range=1024 65535
 
-# TIME-WAIT 复用
+# TIME-WAIT reuse
 net.ipv4.tcp_tw_reuse=1
 
-# SYN 防御（必须开启）
+# SYN defense (must enable)
 net.ipv4.tcp_syncookies=1
 
-# 连接队列调大
+# Connection backlog increase
 net.core.somaxconn=4096
 net.core.netdev_max_backlog=16384
 net.ipv4.tcp_max_syn_backlog=8192
 
-# 长连接优化：空闲后不慢启动
+# Long connection: no slow start after idle
 net.ipv4.tcp_slow_start_after_idle=0
 
-# 长链路必备
+# Required for long path
 net.ipv4.tcp_window_scaling=1
 net.ipv4.tcp_timestamps=1
 net.ipv4.tcp_sack=1
 EOF
 
-# 2. 立即生效 sysctl
+# 2. Apply sysctl immediately
 sysctl --system
 
-# 3. 写入文件句柄最大限制
+# 3. Write file handle limits
 cat >> /etc/security/limits.conf <<EOF
 * soft nofile 1048576
 * hard nofile 1048576
@@ -69,14 +69,14 @@ root soft nofile 1048576
 root hard nofile 1048576
 EOF
 
-# 4. 当前终端立即生效句柄
+# 4. Apply ulimit to current session
 ulimit -n 1048576
 
-# 5. 输出结果
+# 5. Print results
 echo "=================================="
-echo " BBR + TCP 优化 已全部生效！"
+echo " BBR + TCP optimization applied!"
 echo "=================================="
-echo "拥塞控制: $(sysctl -n net.ipv4.tcp_congestion_control)"
-echo "队列规则: $(sysctl -n net.core.default_qdisc)"
-echo "文件句柄: $(ulimit -n)"
+echo "Congestion control: $(sysctl -n net.ipv4.tcp_congestion_control)"
+echo "Queue discipline: $(sysctl -n net.core.default_qdisc)"
+echo "File handles: $(ulimit -n)"
 echo "=================================="
