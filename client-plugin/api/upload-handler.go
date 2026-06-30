@@ -28,16 +28,22 @@ var (
 // ParseHeadersAndBuildUploadInfo 一站式处理请求头解析、校验、UploadInfo构造
 // 入参：Gin上下文、日志前缀、日志器
 // 出参：构造好的UploadInfo / 是否已向客户端返回响应（避免重复响应）/ 错误信息
-func ParseHeadersAndBuildUploadInfo(c *gin.Context, pre string, logger *slog.Logger) (base.UploadStruct, int64, error) {
+func ParseHeadersAndBuildUploadInfo(c *gin.Context, pre string,
+	logger *slog.Logger) (base.UploadStruct, int64, error) {
 
 	logger.Info("Start parsing upload info", slog.String("pre", pre))
 
-	//todo file size 可以通过 header传入 省的计算
-	sizeStr := c.GetHeader(util.HeaderFileSize)
-	fileSize, err := strconv.ParseInt(sizeStr, 10, 64)
-	if err != nil {
-		// 转换失败处理：比如返回错误响应
-		logger.Warn("Failed to parse file size", slog.String("pre", pre), slog.String("sizeStr", sizeStr))
+	//todo file size can be passed via header to avoid calculation
+	var fileSize int64
+	if sizeStr := c.GetHeader(util.HeaderFileSize); sizeStr != "" {
+		if parsedSize, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
+			fileSize = parsedSize
+		} else {
+			logger.Warn("Failed to parse file size, will calculate from source",
+				slog.String("pre", pre), slog.String("sizeStr", sizeStr))
+		}
+	} else {
+		logger.Warn("File size not found in header, will calculate from source", slog.String("pre", pre))
 	}
 
 	var req base.UploadStruct
@@ -144,10 +150,15 @@ func V1ProxyUploadHandler(logger *slog.Logger) gin.HandlerFunc {
 }
 
 // getRoutingInfoFromServiceB 调用B服务获取路由信息
-func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre string, logger *slog.Logger) (upload.RoutingInfo, error) {
+func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre string,
+	logger *slog.Logger) (upload.RoutingInfo, error) {
 
 	// 构建调用B服务的请求
-	reqBodyBytes, _ := json.Marshal(uploadInfo.EndPoints)
+	reqBodyBytes, err := json.Marshal(uploadInfo.EndPoints)
+	if err != nil {
+		logger.Error("marshal endpoints failed", slog.String("pre", pre), slog.Any("err", err))
+		return upload.RoutingInfo{}, err
+	}
 	req, err := http.NewRequest("POST", config.Config_.ControlHost+RoutingURL, bytes.NewReader(reqBodyBytes))
 	if err != nil {
 		logger.Error("build service B request failed", slog.String("pre", pre),
@@ -192,11 +203,15 @@ func getRoutingInfoFromServiceControlPlane(uploadInfo base.UploadStruct, pre str
 	}
 
 	// 解析路由信息
-	reqDataBytes, _ := json.Marshal(apiResp.Data)
+	reqDataBytes, err := json.Marshal(apiResp.Data)
+	if err != nil {
+		logger.Error("marshal routing data failed", slog.String("pre", pre), slog.Any("err", err))
+		return upload.RoutingInfo{}, err
+	}
 	logger.Info("get service control plane response", slog.String("pre", pre),
 		slog.String("responseData", string(reqDataBytes)))
 	var routingInfo upload.RoutingInfo
-	if err := json.Unmarshal(reqDataBytes, &routingInfo); err != nil {
+	if err = json.Unmarshal(reqDataBytes, &routingInfo); err != nil {
 		logger.Error("unmarshal routing info failed", slog.String("pre", pre),
 			slog.String("err", err.Error()))
 		return upload.RoutingInfo{}, err

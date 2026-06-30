@@ -115,9 +115,8 @@ func ChunkMergeHandler(logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 
-		// 3. 解析是否删除分片（默认true）
-		deleteChunks := true
-		deleteChunks = req.DeleteChunks
+		// 3. Whether to delete chunks after merge
+		deleteChunks := req.DeleteChunks
 
 		// 4. 构建合并配置
 		mergeCfg := ChunkMergeConfig{

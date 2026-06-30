@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"io/ioutil"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,8 @@ import (
 	"rigel-client/util"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -266,6 +267,7 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 					slog.String("vm_ip", ip),
 					slog.String("error", finalErr.Error()),
 				)
+				return
 			}
 
 			req.Header.Set("Content-Type", "application/json")
@@ -375,5 +377,5 @@ func ProcessLargeFileUpload(cleintB bool, largeFile LargeFile, size int64, pre s
 		slog.Any("error", errs),
 		slog.Any("split_file_names", splitFileNames),
 	)
-	return nil, nil
+	return nil, fmt.Errorf("partial VM upload failures: %d nodes failed", len(errs))
 }
