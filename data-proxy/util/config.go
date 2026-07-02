@@ -1,4 +1,4 @@
-package config
+package util
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ var (
 // Config 一级结构体，对应yaml平级配置
 type Config struct {
 	Port string `yaml:"port"`
-	Mem  int64  `yaml:"mem"`
+	//Mem  int64  `yaml:"mem"`
 }
 
 // ReadYamlConfig 读取同层级的config.yaml配置
@@ -29,7 +29,7 @@ func ReadYamlConfig(logger *slog.Logger) (*Config, error) {
 	configPath := filepath.Join(exeDir, "config.yaml") // 拼接同层级的config.yaml路径
 
 	// 2. 校验配置文件是否存在
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, err = os.Stat(configPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("配置文件不存在: %s（请确保config.yaml和程序同目录）", configPath)
 	}
 
@@ -41,7 +41,7 @@ func ReadYamlConfig(logger *slog.Logger) (*Config, error) {
 
 	// 4. 解析yaml到结构体
 	var config Config
-	if err := yaml.Unmarshal(content, &config); err != nil {
+	if err = yaml.Unmarshal(content, &config); err != nil {
 		return nil, fmt.Errorf("解析yaml失败: %w", err)
 	}
 

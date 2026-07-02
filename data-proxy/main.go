@@ -3,9 +3,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"data-proxy/config"
-	"data-proxy/congestion"
 	"data-proxy/health"
+	"data-proxy/queue"
 	"data-proxy/util"
 	"github.com/gin-gonic/gin"
 	"io"
@@ -25,7 +24,7 @@ import (
 const (
 	HeaderHops      = "x-hops"
 	HeaderIndex     = "x-index"
-	HeaderDestTyep  = "X-Dest-Type"
+	HeaderDestType  = "X-Dest-Type"
 	RemoteDisk      = "remote-disk"
 	DefaultIndex    = "1"
 	ServerErrorCode = 503
@@ -108,8 +107,8 @@ func getClient(target string, scheme string) *http.Client {
 		MaxIdleConns:        50,
 		MaxIdleConnsPerHost: 50,
 		IdleConnTimeout:     10 * time.Second,
-		ReadBufferSize:      congestion.BufferSize * 1024,
-		WriteBufferSize:     congestion.BufferSize * 1024,
+		ReadBufferSize:      queue.BufferSize * 1024,
+		WriteBufferSize:     queue.BufferSize * 1024,
 	}
 
 	if scheme == "https" {
@@ -179,7 +178,7 @@ func handler(logger *slog.Logger) http.HandlerFunc {
 		method := r.Method
 		//最后一跳的逻辑
 		if newIndex == len(hops) {
-			sourceType := r.Header.Get(HeaderDestTyep)
+			sourceType := r.Header.Get(HeaderDestType)
 			if sourceType != RemoteDisk {
 				scheme = "https"
 				method = "PUT"
@@ -221,9 +220,9 @@ func handler(logger *slog.Logger) http.HandlerFunc {
 		w.WriteHeader(resp.StatusCode)
 
 		//只在真正转发数据时计数
-		atomic.AddInt64(&congestion.ActiveTransfers, 1)
+		atomic.AddInt64(&queue.ActiveTransfers, 1)
 		_, err = io.Copy(w, &countingReader{r: resp.Body})
-		atomic.AddInt64(&congestion.ActiveTransfers, -1)
+		atomic.AddInt64(&queue.ActiveTransfers, -1)
 
 		if err != nil {
 			logger.Error("Error copying response body", slog.String("pre", pre), slog.Any("err", err))
@@ -259,13 +258,13 @@ func main() {
 
 	pre := "init"
 
-	config.Config_, err = config.ReadYamlConfig(logger)
+	util.Config_, err = util.ReadYamlConfig(logger)
 	if err != nil {
 		logger.Error("read config failed", slog.String("pre", pre), "error", err)
 		return
 	} else {
 		logger.Info("print config info", slog.String("pre", pre),
-			slog.Any("config", config.Config_))
+			slog.Any("config", util.Config_))
 	}
 
 	//mem := config.Config_.Mem
@@ -276,11 +275,11 @@ func main() {
 	router := gin.Default()
 	router.GET("/healthStateChange", health.HealthStateChange(logger))
 	router.GET("/health", health.Health(logger))
-	router.GET("/queueInfo", congestion.GetCongestionInfo(logger))
+	router.GET("/queueInfo", queue.GetCongestionInfo(logger))
 	router.NoRoute(func(c *gin.Context) { handler(logger)(c.Writer, c.Request) })
 
 	port := "8095"
-	port = config.Config_.Port
+	port = util.Config_.Port
 
 	logger.Info("Gin Run success", slog.String("pre", pre), slog.String("port", port))
 	if err := router.Run(":" + port); err != nil {

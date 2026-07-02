@@ -43,7 +43,6 @@ func Health(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		pre := util.GenerateRandomLetters(5)
 
-		// 读锁也可以，我保持你原来的写法不动
 		statusLock.Lock()
 		defer statusLock.Unlock()
 
