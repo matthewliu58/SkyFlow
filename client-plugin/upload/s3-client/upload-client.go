@@ -3,7 +3,6 @@ package s3_client
 import (
 	"context"
 	"fmt"
-	"golang.org/x/time/rate"
 	"io"
 	"log/slog"
 	"net"
@@ -12,27 +11,29 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type Upload struct {
-	localBaseDir string // 本地基础目录（文件模式用）
-	bucketName   string // S3 存储桶名称
-	region       string // AWS 区域
+	localBaseDir string // Local base directory (used in disk mode)
+	bucketName   string // S3 bucket name
+	region       string // AWS region
 	accessKey    string // AWS Access Key ID
 	secretKey    string // AWS Secret Access Key
-	endpoint     string // 留空 = AWS 官方
+	endpoint     string // Empty = AWS official
 	usePathStyle bool
 }
 
-// NewUpload 初始化 AWS S3 Upload 实例（完全对齐 GCP 风格）
+// NewUpload initializes AWS S3 Upload instance (aligned with GCP style)
 func NewUpload(
 	localBaseDir, bucketName, region, accessKey, secretKey, endpoint string,
 	usePathStyle bool,
-	pre string,          // 日志前缀（和 GCP 保持一致）
-	logger *slog.Logger, // 日志实例
+	pre string, // Log prefix (same as GCP)
+	logger *slog.Logger, // Logger instance
 ) *Upload {
 	u := &Upload{
 		localBaseDir: localBaseDir,
@@ -43,7 +44,7 @@ func NewUpload(
 		endpoint:     endpoint,
 		usePathStyle: usePathStyle,
 	}
-	// 和 GCP 完全一致的日志打印逻辑
+	// Same logging logic as GCP
 	logger.Info("NewUpload", slog.String("pre", pre), slog.Any("Upload", *u))
 	return u
 }
@@ -52,11 +53,11 @@ func (u *Upload) UploadFile(
 	ctx context.Context,
 	objectName string,
 	contentLength int64,
-	hops string,               // 兼容 GCP 入参（预留，AWS 客户端模式无需使用）
-	rateLimiter *rate.Limiter, // 兼容 GCP 入参（如需限流可启用）
+	hops string, // Compatible with GCP parameter (reserved, not used in AWS client mode)
+	rateLimiter *rate.Limiter, // Compatible with GCP parameter (enable if rate limiting needed)
 	reader io.ReadCloser,
-	inMemory bool, // true=内存模式，false=文件模式
-	pre string,    // 日志前缀（关键追溯字段）
+	inMemory bool, // true=memory mode, false=disk mode
+	pre string, // Log prefix (key tracing field)
 	logger *slog.Logger,
 ) error {
 
@@ -92,28 +93,28 @@ func (u *Upload) UploadFile(
 	}
 
 	var uploadBody io.Reader
-	//var localFile *os.File // 文件模式下的本地文件句柄
+	//var localFile *os.File // Local file handle for disk mode
 
-	// inMemory=true → 内存流式上传
+	// inMemory=true → memory streaming upload
 	if inMemory {
 		if reader == nil {
 			err := fmt.Errorf("in-memory mode requires non-nil dataReader")
 			logger.Error("In-memory mode invalid", slog.String("pre", pre), slog.Any("err", err))
 			return err
 		}
-		defer reader.Close() // 内存模式关闭传入的 Reader
+		defer reader.Close() // Close input Reader in memory mode
 
-		// 可选：启用限流（如需和 GCP 保持一致的限流逻辑）
+		// Optional: enable rate limiting (to keep consistent with GCP)
 		if rateLimiter != nil {
 			//uploadBody = NewRateLimitedReader(ctx, reader, rateLimiter)
 		} else {
 			uploadBody = reader
 		}
 
-		// inMemory=false → 本地文件上传
+		// inMemory=false → local file upload
 	} else {
 		localFilePath := filepath.Join(u.localBaseDir, objectName)
-		// 打开本地文件（对齐 GCP 的错误日志格式）
+		// Open local file (aligned with GCP error log format)
 		f, err := os.Open(localFilePath)
 		if err != nil {
 			logger.Error("Failed to open local file",
@@ -123,9 +124,9 @@ func (u *Upload) UploadFile(
 			return fmt.Errorf("failed to open local file: %w", err)
 		}
 		//localFile = f
-		defer f.Close() // 确保本地文件关闭
+		defer f.Close() // Ensure local file is closed
 
-		// 可选：启用限流
+		// Optional: enable rate limiting
 		if rateLimiter != nil {
 			//uploadBody = NewRateLimitedReader(ctx, f, rateLimiter)
 		} else {
@@ -133,17 +134,17 @@ func (u *Upload) UploadFile(
 		}
 	}
 
-	// 构建 S3 上传请求
+	// Build S3 upload request
 	putInput := &s3.PutObjectInput{
 		Bucket:        aws.String(u.bucketName),
 		Key:           aws.String(objectName),
 		Body:          uploadBody,
-		ContentType:   aws.String("application/octet-stream"), // 和 GCP 一致
+		ContentType:   aws.String("application/octet-stream"), // Same as GCP
 		ContentLength: aws.Int64(contentLength),
 		//StorageClass: types.StorageClassStandard,
 	}
 
-	// 执行上传（传入外层 ctx，支持中途取消）
+	// Execute upload (pass outer ctx, support mid-upload cancellation)
 	_, err = s3Client.PutObject(ctx, putInput)
 	if err != nil {
 		logger.Error("Failed to upload to S3 bucket",
@@ -170,7 +171,7 @@ func (u *Upload) UploadFile(
 	return nil
 }
 
-// initS3Client 初始化 S3 客户端（带超时配置）
+// initS3Client initializes S3 client (with timeout config)
 func (u *Upload) initS3Client(ctx context.Context) (*s3.Client, error) {
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -184,7 +185,7 @@ func (u *Upload) initS3Client(ctx context.Context) (*s3.Client, error) {
 		},
 	}
 
-	// 基础配置
+	// Basic config
 	loadOpts := []func(*config.LoadOptions) error{
 		config.WithRegion(u.region),
 		config.WithHTTPClient(httpClient),
@@ -197,7 +198,7 @@ func (u *Upload) initS3Client(ctx context.Context) (*s3.Client, error) {
 		})),
 	}
 
-	//如果有 Endpoint，就覆盖（适配所有S3兼容）
+	// If Endpoint is set, override (supports all S3-compatible services)
 	if u.endpoint != "" {
 		endpointResolver := aws.EndpointResolverWithOptionsFunc(
 			func(service, region string, options ...interface{}) (aws.Endpoint, error) {
@@ -210,13 +211,13 @@ func (u *Upload) initS3Client(ctx context.Context) (*s3.Client, error) {
 		loadOpts = append(loadOpts, config.WithEndpointResolverWithOptions(endpointResolver))
 	}
 
-	// 加载配置
+	// Load config
 	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("load config failed: %w", err)
 	}
 
-	// 创建客户端，自动控制 PathStyle
+	// Create client, auto-control PathStyle
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = u.usePathStyle
 	}), nil

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"rigel-client/limit-rate"
+	limit_rate "rigel-client/limit-rate"
 	"rigel-client/util"
 	"strings"
 	"time"
@@ -23,20 +23,20 @@ const (
 )
 
 type Upload struct {
-	localBaseDir string // 本地基础目录（文件模式用）
-	bucketName   string // S3 存储桶名称
-	region       string // AWS 区域
+	localBaseDir string // Local base directory (used in disk mode)
+	bucketName   string // S3 bucket name
+	region       string // AWS region
 	accessKey    string // AWS Access Key ID
 	secretKey    string // AWS Secret Access Key
-	endpoint     string // 留空 = AWS 官方
+	endpoint     string // Empty = AWS official
 	usePathStyle bool
 }
 
-// NewUpload 初始化 AWS S3 Upload 实例
+// NewUpload initializes AWS S3 Upload instance
 func NewUpload(
 	localBaseDir, bucketName, region, accessKey, secretKey, endpoint string,
 	usePathStyle bool,
-	pre string, // 日志前缀
+	pre string, // Log prefix
 	logger *slog.Logger,
 ) *Upload {
 	u := &Upload{
@@ -48,7 +48,7 @@ func NewUpload(
 		endpoint:     endpoint,
 		usePathStyle: usePathStyle,
 	}
-	// 和 GCP 完全一致的日志打印逻辑
+	// Same logging logic as GCP
 	logger.Info("NewUpload", slog.String("pre", pre), slog.Any("Upload", *u))
 	return u
 }
@@ -109,7 +109,7 @@ func (u *Upload) UploadFile(
 	dateStamp := now.Format("20060102")
 	amzDate := now.Format("20060102T150405Z")
 
-	// 签名密钥
+	// Signing key
 	signingKey := getSignatureKey(u.secretKey, dateStamp, u.region, awsService)
 
 	canonicalURI := fmt.Sprintf("/%s/%s", u.bucketName, objectName)
@@ -151,7 +151,7 @@ func (u *Upload) UploadFile(
 	)
 	logger.Info("authHeader", slog.String("pre", pre), slog.String("authHeader", authHeader))
 
-	// PUT 方法
+	// PUT method
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, rateLimitedBody)
 	if err != nil {
 		return err
@@ -162,14 +162,14 @@ func (u *Upload) UploadFile(
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.ContentLength = contentLength
 
-	// 你的代理头
+	// Proxy headers
 	req.Header.Set("X-Pre", pre)
 	req.Header.Set(util.HeaderXHops, hops)
 	req.Header.Set(util.HeaderXChunkIndex, "1")
 	req.Header.Set(util.HeaderXRateLimitEnable, "true")
 	req.Header.Set(util.HeaderDestType, util.S3Cloud)
 
-	// 发送
+	// Send request
 	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -186,7 +186,7 @@ func (u *Upload) UploadFile(
 	return nil
 }
 
-// getSignatureKey 生成 AWS 签名密钥（AWS4 规范）
+// getSignatureKey generates AWS signing key (AWS4 specification)
 func getSignatureKey(secretKey, dateStamp, region, service string) []byte {
 	kDate := hmacSHA256([]byte("AWS4"+secretKey), []byte(dateStamp))
 	kRegion := hmacSHA256(kDate, []byte(region))
@@ -195,14 +195,14 @@ func getSignatureKey(secretKey, dateStamp, region, service string) []byte {
 	return kSigning
 }
 
-// hmacSHA256 计算 HMAC-SHA256
+// hmacSHA256 calculates HMAC-SHA256
 func hmacSHA256(key, data []byte) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(data)
 	return mac.Sum(nil)
 }
 
-// sha256Hex 计算 SHA256 并返回十六进制字符串
+// sha256Hex calculates SHA256 and returns hex string
 func sha256Hex(data string) string {
 	hash := sha256.Sum256([]byte(data))
 	return fmt.Sprintf("%x", hash)

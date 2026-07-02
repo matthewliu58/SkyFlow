@@ -16,15 +16,15 @@ import (
 )
 
 type GetSize struct {
-	bucketName   string // S3 存储桶名称
-	region       string // AWS 区域
+	bucketName   string // S3 bucket name
+	region       string // AWS region
 	accessKey    string // AWS Access Key ID
 	secretKey    string // AWS Secret Access Key
-	endpoint     string // 留空 = AWS 官方
+	endpoint     string // Empty = AWS official
 	usePathStyle bool
 }
 
-// NewGetSize 初始化 AWS S3 GetSize 实例（对齐 GCP NewGetSize）
+// NewGetSize initializes AWS S3 GetSize instance (aligned with GCP NewGetSize)
 func NewGetSize(
 	bucketName, region, accessKey, secretKey, endpoint string,
 	usePathStyle bool,
@@ -39,17 +39,17 @@ func NewGetSize(
 		endpoint:     endpoint,
 		usePathStyle: usePathStyle,
 	}
-	// 和 GCP 完全一致的日志打印逻辑
+	// Same logging logic as GCP
 	logger.Info("NewGetSize", slog.String("pre", pre), slog.Any("GetSize", *gs))
 	return gs
 }
 
-// GetFileSize 获取 AWS S3 对象大小（对齐 GCP GetFileSize 接口）
-// 返回值：文件大小（字节）、错误
+// GetFileSize gets AWS S3 object size (aligned with GCP GetFileSize interface)
+// Returns: file size (bytes), error
 func (g *GetSize) GetFileSize(ctx context.Context, filename string, pre string, logger *slog.Logger) (int64, error) {
 	objectName := filename
 
-	// 1. 监听 ctx 取消信号，提前终止操作
+	// 1. Listen for ctx cancellation signal, terminate early
 	select {
 	case <-ctx.Done():
 		err := fmt.Errorf("get s3 file size canceled: %w", ctx.Err())
@@ -58,7 +58,7 @@ func (g *GetSize) GetFileSize(ctx context.Context, filename string, pre string, 
 	default:
 	}
 
-	// 2. 初始化 S3 客户端（带超时控制）
+	// 2. Initialize S3 client (with timeout control)
 	s3Client, err := g.initS3Client(ctx)
 	if err != nil {
 		logger.Error("创建 S3 客户端失败", slog.String("pre", pre),
@@ -68,13 +68,13 @@ func (g *GetSize) GetFileSize(ctx context.Context, filename string, pre string, 
 		return 0, fmt.Errorf("create s3 client failed: %w", err)
 	}
 
-	// 3. 构建 HeadObject 请求（仅获取元数据，不下载文件内容）
+	// 3. Build HeadObject request (get metadata only, no file content)
 	headInput := &s3.HeadObjectInput{
 		Bucket: aws.String(g.bucketName),
 		Key:    aws.String(objectName),
 	}
 
-	// 4. 发送 HeadObject 请求获取元数据（核心：读取 ContentLength）
+	// 4. Send HeadObject request to get metadata (core: read ContentLength)
 	headResp, err := s3Client.HeadObject(ctx, headInput)
 	if err != nil {
 		logger.Error("获取 S3 Object 元数据失败", slog.String("pre", pre),
@@ -82,36 +82,36 @@ func (g *GetSize) GetFileSize(ctx context.Context, filename string, pre string, 
 			slog.String("objectName", objectName),
 			slog.Any("err", err))
 
-		// 区分常见错误类型（对齐 GCP 的 ErrObjectNotExist）
+		// Distinguish common error types (aligned with GCP's ErrObjectNotExist)
 		var apiErr smithy.APIError
 		if errors.As(err, &apiErr) {
-			// S3 对象不存在错误码
+			// S3 object not found error code
 			if apiErr.ErrorCode() == "NotFound" || apiErr.ErrorCode() == "NoSuchKey" {
-				return 0, fmt.Errorf("object %s/%s 不存在: %w", g.bucketName, objectName, err)
+				return 0, fmt.Errorf("object %s/%s not found: %w", g.bucketName, objectName, err)
 			}
-			// 权限不足错误
+			// Permission denied error
 			if apiErr.ErrorCode() == "AccessDenied" {
-				return 0, fmt.Errorf("访问对象 %s/%s 权限不足: %w", g.bucketName, objectName, err)
+				return 0, fmt.Errorf("access denied for object %s/%s: %w", g.bucketName, objectName, err)
 			}
 		}
 		return 0, fmt.Errorf("s3.HeadObject failed: %w", err)
 	}
 
-	// 5. 提取文件大小（ContentLength 对应字节数）
+	// 5. Extract file size (ContentLength corresponds to bytes)
 	fileSize := headResp.ContentLength
 
-	// 6. 日志记录结果（和 GCP 完全一致的日志字段）
-	logger.Info("成功获取 S3 Object 大小", slog.String("pre", pre),
+	// 6. Log result (same log fields as GCP)
+	logger.Info("Successfully retrieved S3 Object size", slog.String("pre", pre),
 		slog.String("bucketName", g.bucketName),
 		slog.String("objectName", objectName),
 		slog.Int64("file_size_bytes", *fileSize),
-		slog.String("file_size_human", formatBytes(*fileSize))) // 复用 GCP 的格式化函数
+		slog.String("file_size_human", formatBytes(*fileSize))) // Reuse GCP's format function
 
-	// 7. 返回文件大小（字节）
+	// 7. Return file size (bytes)
 	return *fileSize, nil
 }
 
-// initS3Client 初始化 S3 客户端（带超时配置）
+// initS3Client initializes S3 client (with timeout config)
 func (u *GetSize) initS3Client(ctx context.Context) (*s3.Client, error) {
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -125,7 +125,7 @@ func (u *GetSize) initS3Client(ctx context.Context) (*s3.Client, error) {
 		},
 	}
 
-	// 基础配置
+	// Basic config
 	loadOpts := []func(*config.LoadOptions) error{
 		config.WithRegion(u.region),
 		config.WithHTTPClient(httpClient),
@@ -138,7 +138,7 @@ func (u *GetSize) initS3Client(ctx context.Context) (*s3.Client, error) {
 		})),
 	}
 
-	//如果有 Endpoint，就覆盖（适配所有S3兼容）
+	// If Endpoint is set, override (supports all S3-compatible services)
 	if u.endpoint != "" {
 		endpointResolver := aws.EndpointResolverWithOptionsFunc(
 			func(service, region string, options ...interface{}) (aws.Endpoint, error) {
@@ -151,20 +151,20 @@ func (u *GetSize) initS3Client(ctx context.Context) (*s3.Client, error) {
 		loadOpts = append(loadOpts, config.WithEndpointResolverWithOptions(endpointResolver))
 	}
 
-	// 加载配置
+	// Load config
 	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("load config failed: %w", err)
 	}
 
-	// 创建客户端，自动控制 PathStyle
+	// Create client, auto-control PathStyle
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = u.usePathStyle
 	}), nil
 }
 
-// formatBytes 将字节数转换为易读的字符串
-// 如：1024 → 1KB，1048576 → 1MB
+// formatBytes converts bytes to human-readable string
+// e.g.: 1024 → 1KB, 1048576 → 1MB
 func formatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {

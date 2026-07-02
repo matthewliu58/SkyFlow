@@ -17,17 +17,17 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-// 核心结构体
+// Core struct
 type Compose struct {
-	bucket       string // S3 存储桶名称
-	region       string // AWS 区域
+	bucket       string // S3 bucket name
+	region       string // AWS region
 	accessKey    string // AWS Access Key ID
 	secretKey    string // AWS Secret Access Key
-	endpoint     string // 留空 = AWS 官方
+	endpoint     string // Empty = AWS official
 	usePathStyle bool
 }
 
-// NewCompose 初始化 AWS S3 Compose 实例
+// NewCompose initializes AWS S3 Compose instance
 func NewCompose(
 	bucket, region, accessKey, secretKey, endpoint string,
 	usePathStyle bool,
@@ -48,12 +48,12 @@ func NewCompose(
 
 func (c *Compose) ComposeFile(
 	ctx context.Context,
-	objectName string, // 最终合成的文件名
-	parts []string, // 分片文件列表
+	objectName string, // Final composed filename
+	parts []string, // Chunk file list
 	pre string,
 	logger *slog.Logger,
 ) error {
-	// 上下文超时检查
+	// Check context timeout
 	select {
 	case <-ctx.Done():
 		err := fmt.Errorf("upload canceled: %w", ctx.Err())
@@ -62,17 +62,17 @@ func (c *Compose) ComposeFile(
 	default:
 	}
 
-	// 初始化 S3 客户端
+	// Initialize S3 client
 	s3Client, err := c.initS3Client(ctx)
 	if err != nil {
 		logger.Error("create S3 client failed", slog.String("pre", pre), slog.Any("err", err))
 		return fmt.Errorf("new s3 client failed: %w", err)
 	}
 
-	// 1. 单文件场景：复制+删除源文件
+	// 1. Single file scenario: copy + delete source file
 	if len(parts) == 1 {
 		partName := parts[0]
-		// 同名无需操作
+		// Skip if same name
 		if partName == objectName {
 			logger.Info("single file name matches final name, skip compose",
 				slog.String("pre", pre),
@@ -80,7 +80,7 @@ func (c *Compose) ComposeFile(
 			return nil
 		}
 
-		// 复制文件
+		// Copy file
 		logger.Info("start copy single file to final location",
 			slog.String("pre", pre),
 			slog.String("from", partName),
@@ -105,7 +105,7 @@ func (c *Compose) ComposeFile(
 			slog.String("from", partName),
 			slog.String("to", objectName))
 
-		// 删除源文件（容错：失败仅告警）
+		// Delete source file (fault-tolerant: warn only on failure)
 		delInput := &s3.DeleteObjectInput{
 			Bucket: aws.String(c.bucket),
 			Key:    aws.String(partName),
@@ -138,9 +138,9 @@ func (c *Compose) ComposeFile(
 
 	current := parts
 	level := 0
-	var tempObjects []string // 记录临时合成文件
+	var tempObjects []string // Track temporary composed files
 
-	// 树形合成：每次合并最多1000个分片（S3 单请求最大限制）
+	// Tree composition: merge up to 1000 chunks per round (S3 max per request)
 	for len(current) > 1 {
 		var next []string
 
@@ -152,7 +152,7 @@ func (c *Compose) ComposeFile(
 			group := current[i:end]
 			tmpObjectName := fmt.Sprintf("%s.compose.%d.%d", objectName, level, i)
 
-			// 合并当前分组的分片到临时文件
+			// Merge current group of chunks to temp file
 			if err := c.mergePartsToTempFile(ctx, s3Client, group, tmpObjectName, pre, logger); err != nil {
 				logger.Error("merge temp object failed",
 					slog.String("pre", pre),
@@ -176,13 +176,13 @@ func (c *Compose) ComposeFile(
 		level++
 	}
 
-	// 3. 最终合成：临时文件→最终文件
+	// 3. Final composition: temp file → final file
 	logger.Info("start finalize object",
 		slog.String("pre", pre),
 		slog.String("from", current[0]),
 		slog.String("to", objectName))
 
-	// 复制临时文件到最终位置
+	// Copy temp file to final location
 	finalCopyInput := &s3.CopyObjectInput{
 		Bucket:     aws.String(c.bucket),
 		CopySource: aws.String(fmt.Sprintf("/%s/%s", c.bucket, current[0])),
@@ -198,8 +198,8 @@ func (c *Compose) ComposeFile(
 		return fmt.Errorf("copy temp to final failed: %w", err)
 	}
 
-	// 4. 清理临时文件和分片
-	// 4.1 删除中间临时文件
+	// 4. Cleanup temp files and chunks
+	// 4.1 Delete intermediate temp files
 	for _, tmp := range tempObjects {
 		if tmp != current[0] {
 			delInput := &s3.DeleteObjectInput{
@@ -224,7 +224,7 @@ func (c *Compose) ComposeFile(
 		}
 	}
 
-	// 4.2 删除最终临时文件
+	// 4.2 Delete final temp file
 	delFinalTempInput := &s3.DeleteObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(current[0]),
@@ -236,7 +236,7 @@ func (c *Compose) ComposeFile(
 			slog.Any("err", delErr))
 	}
 
-	// 4.3 删除原始分片文件
+	// 4.3 Delete original chunk files
 	for _, p := range parts {
 		delInput := &s3.DeleteObjectInput{
 			Bucket: aws.String(c.bucket),
@@ -265,7 +265,7 @@ func (c *Compose) ComposeFile(
 	return nil
 }
 
-// initS3Client 初始化 S3 客户端（带超时配置）
+// initS3Client initializes S3 client (with timeout config)
 func (u *Compose) initS3Client(ctx context.Context) (*s3.Client, error) {
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -279,7 +279,7 @@ func (u *Compose) initS3Client(ctx context.Context) (*s3.Client, error) {
 		},
 	}
 
-	// 基础配置
+	// Basic config
 	loadOpts := []func(*config.LoadOptions) error{
 		config.WithRegion(u.region),
 		config.WithHTTPClient(httpClient),
@@ -292,7 +292,7 @@ func (u *Compose) initS3Client(ctx context.Context) (*s3.Client, error) {
 		})),
 	}
 
-	//如果有 Endpoint，就覆盖（适配所有S3兼容）
+	// If Endpoint is set, override (supports all S3-compatible services)
 	if u.endpoint != "" {
 		endpointResolver := aws.EndpointResolverWithOptionsFunc(
 			func(service, region string, options ...interface{}) (aws.Endpoint, error) {
@@ -305,19 +305,19 @@ func (u *Compose) initS3Client(ctx context.Context) (*s3.Client, error) {
 		loadOpts = append(loadOpts, config.WithEndpointResolverWithOptions(endpointResolver))
 	}
 
-	// 加载配置
+	// Load config
 	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("load config failed: %w", err)
 	}
 
-	// 创建客户端，自动控制 PathStyle
+	// Create client, auto-control PathStyle
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = u.usePathStyle
 	}), nil
 }
 
-// mergePartsToTempFile 合并分片到临时文件（S3 兼容合成逻辑）
+// mergePartsToTempFile merges chunks to temp file (S3-compatible compose logic)
 func (c *Compose) mergePartsToTempFile(
 	ctx context.Context,
 	client *s3.Client,
@@ -326,7 +326,7 @@ func (c *Compose) mergePartsToTempFile(
 	pre string,
 	logger *slog.Logger,
 ) error {
-	// 创建临时本地文件
+	// Create temp local file
 	tempFile, err := os.CreateTemp("", "s3-compose-*")
 	if err != nil {
 		return fmt.Errorf("create temp local file failed: %w", err)
@@ -334,10 +334,10 @@ func (c *Compose) mergePartsToTempFile(
 	tempFilePath := tempFile.Name()
 	defer func() {
 		_ = tempFile.Close()
-		_ = os.Remove(tempFilePath) // 清理本地临时文件
+		_ = os.Remove(tempFilePath) // Clean up local temp file
 	}()
 
-	// 下载并合并所有分片
+	// Download and merge all chunks
 	for _, part := range parts {
 		select {
 		case <-ctx.Done():
@@ -345,7 +345,7 @@ func (c *Compose) mergePartsToTempFile(
 		default:
 		}
 
-		// 下载分片
+		// Download chunk
 		getInput := &s3.GetObjectInput{
 			Bucket: aws.String(c.bucket),
 			Key:    aws.String(part),
@@ -355,7 +355,7 @@ func (c *Compose) mergePartsToTempFile(
 			return fmt.Errorf("download part %s failed: %w", part, err)
 		}
 
-		// 写入临时文件
+		// Write to temp file
 		_, err = io.Copy(tempFile, resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
@@ -368,13 +368,13 @@ func (c *Compose) mergePartsToTempFile(
 			slog.String("temp", tempName))
 	}
 
-	// 重置文件指针到开头
+	// Reset file pointer to beginning
 	_, err = tempFile.Seek(0, io.SeekStart)
 	if err != nil {
 		return fmt.Errorf("seek temp file failed: %w", err)
 	}
 
-	// 上传合并后的临时文件到 S3
+	// Upload merged temp file to S3
 	putInput := &s3.PutObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(tempName),

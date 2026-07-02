@@ -20,16 +20,16 @@ import (
 )
 
 type Download struct {
-	localBaseDir string // 本地基础目录（落盘模式用）
-	bucketName   string // S3 存储桶名称
-	region       string // AWS 区域
+	localBaseDir string // Local base directory (used in disk mode)
+	bucketName   string // S3 bucket name
+	region       string // AWS region
 	accessKey    string // AWS Access Key ID
 	secretKey    string // AWS Secret Access Key
-	endpoint     string // 留空 = AWS 官方
+	endpoint     string // Empty = AWS official
 	usePathStyle bool
 }
 
-// NewDownload 初始化 AWS S3 Download 实例
+// NewDownload initializes AWS S3 Download instance
 func NewDownload(
 	localBaseDir, bucketName, region, accessKey, secretKey, endpoint string,
 	usePathStyle bool,
@@ -49,21 +49,21 @@ func NewDownload(
 	return d
 }
 
-// DownloadFile AWS S3 文件下载
+// DownloadFile downloads file from AWS S3
 func (d *Download) DownloadFile(
 	ctx context.Context,
-	filename string, // S3 对象名
-	newFilename string, // 本地文件名（落盘模式用）
-	start int64, // 分片起始字节
-	length int64, // 分片长度（<=0 表示完整下载）
-	bs string, // 兼容 GCP 入参（预留）
-	inMemory bool, // true=内存模式，false=落盘模式
+	filename string, // S3 object name
+	newFilename string, // Local filename (used in disk mode)
+	start int64, // Chunk start byte
+	length int64, // Chunk length (<=0 means full download)
+	bs string, // Compatible with GCP parameter (reserved)
+	inMemory bool, // true=memory mode, false=disk mode
 	pre string,
 	logger *slog.Logger,
-) (io.ReadCloser, error) { // 返回 io.ReadCloser（兼容两种模式）
+) (io.ReadCloser, error) { // Returns io.ReadCloser (compatible with both modes)
 	objectName := filename
 
-	// 上下文超时检查
+	// Check context timeout
 	select {
 	case <-ctx.Done():
 		err := fmt.Errorf("download canceled before start: %w", ctx.Err())
@@ -72,7 +72,7 @@ func (d *Download) DownloadFile(
 	default:
 	}
 
-	// 日志区分模式+完整/分片读取
+	// Log mode + full/range read
 	if inMemory {
 		if length <= 0 {
 			logger.Info("Reading full file from S3 (in-memory mode, no disk write)",
@@ -106,27 +106,27 @@ func (d *Download) DownloadFile(
 		}
 	}
 
-	// 初始化 S3 客户端
+	// Initialize S3 client
 	s3Client, err := d.initS3Client(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create s3 client failed: %w", err)
 	}
 
-	// 构建下载请求（完整/分片）
+	// Build download request (full/range)
 	getInput := &s3.GetObjectInput{
 		Bucket: aws.String(d.bucketName),
 		Key:    aws.String(objectName),
 	}
-	// 分片下载：设置 Range 请求头
+	// Range download: set Range header
 	if length > 0 {
 		endByte := start + length - 1
 		getInput.Range = aws.String(fmt.Sprintf("bytes=%d-%d", start, endByte))
 	}
 
-	// 发送下载请求
+	// Send download request
 	resp, err := s3Client.GetObject(ctx, getInput)
 	if err != nil {
-		// 处理 S3 错误（如文件不存在、权限不足）
+		// Handle S3 errors (e.g., file not found, permission denied)
 		var apiErr smithy.APIError
 		if errors.As(err, &apiErr) {
 			logger.Error("S3 GetObject API error",
@@ -137,43 +137,43 @@ func (d *Download) DownloadFile(
 		return nil, fmt.Errorf("s3 get object failed: %w", err)
 	}
 
-	// 模式1：inMemory=true → 返回流式 Reader（不落盘）
+	// Mode 1: inMemory=true → return streaming Reader (no disk write)
 	if inMemory {
 		return &s3ReaderWrapper{
-			ReadCloser: resp.Body, // 修复：结构体字段是 ReadCloser，不是 Reader
+			ReadCloser: resp.Body, // Fix: struct field is ReadCloser, not Reader
 			client:     s3Client,
 		}, nil
 	}
 
-	// 模式2：inMemory=false → 落盘到本地文件
+	// Mode 2: inMemory=false → write to local file
 	defer resp.Body.Close()
 
-	// 拼接本地文件路径
+	// Concatenate local file path
 	localFilePath := filepath.Join(d.localBaseDir, newFilename)
-	// 创建本地目录
+	// Create local directory
 	if err := os.MkdirAll(d.localBaseDir, 0755); err != nil {
 		return nil, fmt.Errorf("create local dir failed: %w", err)
 	}
 
-	// 创建本地文件
+	// Create local file
 	f, err := os.Create(localFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("create local file failed: %w", err)
 	}
 	defer f.Close()
 
-	// 写入本地文件
+	// Write to local file
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return nil, fmt.Errorf("copy to local file failed: %w", err)
 	}
 
-	// 落盘模式返回本地文件的 Reader
+	// Disk mode: return local file Reader
 	localFileReader, err := os.Open(localFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("open local file failed: %w", err)
 	}
 
-	// 日志反馈结果
+	// Log result
 	if length <= 0 {
 		logger.Info("Full file download success (disk mode)",
 			slog.String("pre", pre),
@@ -191,7 +191,7 @@ func (d *Download) DownloadFile(
 	return localFileReader, nil
 }
 
-// initS3Client 初始化 S3 客户端（带超时配置）
+// initS3Client initializes S3 client (with timeout config)
 func (u *Download) initS3Client(ctx context.Context) (*s3.Client, error) {
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -205,7 +205,7 @@ func (u *Download) initS3Client(ctx context.Context) (*s3.Client, error) {
 		},
 	}
 
-	// 基础配置
+	// Basic config
 	loadOpts := []func(*config.LoadOptions) error{
 		config.WithRegion(u.region),
 		config.WithHTTPClient(httpClient),
@@ -218,7 +218,7 @@ func (u *Download) initS3Client(ctx context.Context) (*s3.Client, error) {
 		})),
 	}
 
-	//如果有 Endpoint，就覆盖（适配所有S3兼容）
+	// If Endpoint is set, override (supports all S3-compatible services)
 	if u.endpoint != "" {
 		endpointResolver := aws.EndpointResolverWithOptionsFunc(
 			func(service, region string, options ...interface{}) (aws.Endpoint, error) {
@@ -231,31 +231,31 @@ func (u *Download) initS3Client(ctx context.Context) (*s3.Client, error) {
 		loadOpts = append(loadOpts, config.WithEndpointResolverWithOptions(endpointResolver))
 	}
 
-	// 加载配置
+	// Load config
 	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("load config failed: %w", err)
 	}
 
-	// 创建客户端，自动控制 PathStyle
+	// Create client, auto-control PathStyle
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = u.usePathStyle
 	}), nil
 }
 
-// s3ReaderWrapper 封装 S3 响应体 ReadCloser + 资源清理逻辑（内存模式用）
+// s3ReaderWrapper wraps S3 response body ReadCloser + resource cleanup logic (for memory mode)
 type s3ReaderWrapper struct {
-	io.ReadCloser            // 正确：resp.Body 是 io.ReadCloser 类型
-	client        *s3.Client // 保留客户端引用（如需扩展清理逻辑）
+	io.ReadCloser            // Correct: resp.Body is io.ReadCloser type
+	client        *s3.Client // Keep client reference (for extended cleanup if needed)
 }
 
-// Close 关闭所有关联资源（调用方必须调用）
+// Close closes all associated resources (caller must call)
 func (w *s3ReaderWrapper) Close() error {
 	var errStr []string
 	if err := w.ReadCloser.Close(); err != nil {
 		errStr = append(errStr, fmt.Sprintf("reader close failed: %v", err))
 	}
-	// S3 客户端无需手动关闭（SDK 自动管理）
+	// S3 client doesn't need manual close (SDK manages automatically)
 	if len(errStr) > 0 {
 		return fmt.Errorf(strings.Join(errStr, "; "))
 	}
