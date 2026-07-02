@@ -2,18 +2,19 @@ package base
 
 import (
 	"context"
-	"golang.org/x/time/rate"
 	"io"
 	"log/slog"
 	"rigel-client/config"
 	"rigel-client/upload/gcs"
-	"rigel-client/upload/gcs-client"
+	gcs_client "rigel-client/upload/gcs-client"
 	"rigel-client/upload/local"
 	"rigel-client/upload/remote"
-	"rigel-client/upload/remote-client"
+	remote_client "rigel-client/upload/remote-client"
 	"rigel-client/upload/s3"
-	"rigel-client/upload/s3-client"
+	s3_client "rigel-client/upload/s3-client"
 	"rigel-client/util"
+
+	"golang.org/x/time/rate"
 )
 
 type EndPoint struct {
@@ -29,15 +30,15 @@ type EndPoints struct {
 }
 
 type User struct {
-	Username string `json:"username" form:"username"` // 客户端用户名
-	Priority int    `json:"priority" form:"priority"` // 优先级
+	Username string `json:"username" form:"username"` // Client username
+	Priority int    `json:"priority" form:"priority"` // Priority level
 }
 
 type File struct {
-	FileName    string `json:"file_name" form:"file_name"`         // 源文件名（如test.zip）
-	FileStart   int64  `json:"file_start" form:"file_start"`       // 文件起始偏移（字节，默认0）
-	FileLength  int64  `json:"file_length" form:"file_length"`     // 文件传输长度（字节，0=整个文件）
-	NewFileName string `json:"new_file_name" form:"new_file_name"` // 目标文件名
+	FileName    string `json:"file_name" form:"file_name"`         // Source file name (e.g., test.zip)
+	FileStart   int64  `json:"file_start" form:"file_start"`       // File start offset (bytes, default 0)
+	FileLength  int64  `json:"file_length" form:"file_length"`     // File transfer length (bytes, 0=entire file)
+	NewFileName string `json:"new_file_name" form:"new_file_name"` // Destination file name
 }
 
 type Proxy struct {
@@ -45,7 +46,7 @@ type Proxy struct {
 }
 
 type End struct {
-	Type      string      `json:"type" form:"type"` // 源类型
+	Type      string      `json:"type" form:"type"` // Source type
 	Interface interface{} `json:"interface" form:"interface"`
 }
 
@@ -77,17 +78,17 @@ type UploadFileInterface interface {
 }
 
 type FileOperateInterfaces struct {
-	GetFileSize  GetFileSizeInterface  // 获取文件大小接口
-	ComposeFile  ComposeFileInterface  // 文件合并接口
-	DownloadFile DownloadFileInterface // 文件下载接口
-	UploadFile   UploadFileInterface   // 文件上传接口
+	GetFileSize  GetFileSizeInterface  // Get file size interface
+	ComposeFile  ComposeFileInterface  // File compose interface
+	DownloadFile DownloadFileInterface // File download interface
+	UploadFile   UploadFileInterface   // File upload interface
 }
 
-// InitInterface 初始化文件操作接口
+// InitInterface Initialize file operation interfaces
 func InitInterface(clientB bool, us UploadStruct, pre string, logger *slog.Logger) FileOperateInterfaces {
 	var fo FileOperateInterfaces
 
-	// 第一步：初始化 读取/下载 相关接口（按Source.Type分支）
+	// Step 1: Initialize read/download interfaces (branch by Source.Type)
 	switch us.Source.Type {
 	case util.GCSCLoud:
 		gcp_ := ExtractGCPFromInterface(us.Source.Interface, pre, logger)
@@ -120,13 +121,13 @@ func InitInterface(clientB bool, us UploadStruct, pre string, logger *slog.Logge
 		fo.GetFileSize = remote.NewGetSize(sd.User, sd.Host, sd.Password, sd.RemoteDir, pre, logger)
 		fo.DownloadFile = remote.NewDownload(sd.User, sd.Host, sd.Password, sd.RemoteDir, us.Proxy.LocalDir, pre, logger)
 
-	// 可选：添加default分支，增强容错性
+	// Optional: Add default branch for better fault tolerance
 	default:
 		logger.Warn("Unsupported Source.Type", slog.String("pre", pre), slog.String("type", string(us.Source.Type)))
 		return fo
 	}
 
-	// 第二步：初始化 上传/合并 相关接口（按Dest.Type分支）
+	// Step 2: Initialize upload/compose interfaces (branch by Dest.Type)
 	switch us.Dest.Type {
 	case util.GCSCLoud:
 		gcp_ := ExtractGCPFromInterface(us.Dest.Interface, pre, logger)
@@ -172,10 +173,10 @@ func InitInterface(clientB bool, us UploadStruct, pre string, logger *slog.Logge
 			fo.ComposeFile = remote.NewCompose(ck_.Merge, true, pre, logger)
 		}
 
-	// 可选：添加default分支，增强容错性
+	// Optional: Add default branch for better fault tolerance
 	default:
 		logger.Warn("Unsupported Dest.Type", slog.String("pre", pre), slog.String("type", string(us.Dest.Type)))
-		// 此处不return，保留已初始化的GetFileSize/DownloadFile
+		// Don't return here, keep initialized GetFileSize/DownloadFile
 	}
 
 	return fo

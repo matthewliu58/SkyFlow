@@ -6,8 +6,8 @@ import (
 )
 
 type Chunk struct {
-	Upload string `json:"upload" form:"upload"` // 上传接口地址
-	Merge  string `json:"merge" form:"merge"`   // 合并接口地址
+	Upload string `json:"upload" form:"upload"` // Upload API endpoint
+	Merge  string `json:"merge" form:"merge"`   // Merge API endpoint
 }
 
 func ExtractChunkFromInterface(obj interface{}, pre string, logger *slog.Logger) *Chunk {
@@ -16,14 +16,14 @@ func ExtractChunkFromInterface(obj interface{}, pre string, logger *slog.Logger)
 		return nil
 	}
 
-	// 先转 JSON
+	// Convert to JSON first
 	data, err := json.Marshal(obj)
 	if err != nil {
 		logger.Error("marshal chunk interface failed", slog.String("pre", pre), slog.Any("err", err))
 		return nil
 	}
 
-	// 再反序列化为 Chunk
+	// Then deserialize to Chunk
 	var ck Chunk
 	if err := json.Unmarshal(data, &ck); err != nil {
 		logger.Error("unmarshal to Chunk failed", slog.String("pre", pre), slog.Any("err", err))
