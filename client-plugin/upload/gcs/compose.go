@@ -1,12 +1,13 @@
 package gcs
 
 import (
-	"cloud.google.com/go/storage"
 	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
+
+	"cloud.google.com/go/storage"
 )
 
 type Compose struct {
@@ -16,14 +17,14 @@ type Compose struct {
 
 func NewCompose(
 	bucket, credFile string,
-	pre string, // 日志前缀（和之前保持一致）
-	logger *slog.Logger, // 日志实例（和之前保持一致）
+	pre string, // Log prefix (keep consistent with previous)
+	logger *slog.Logger, // Log instance (keep consistent with previous)
 ) *Compose {
 	c := &Compose{
 		bucket:   bucket,
 		credFile: credFile,
 	}
-	// 和其他初始化函数完全一致的日志打印逻辑
+	// Same log printing logic as other init functions
 	logger.Info("NewCompose", slog.String("pre", pre), slog.Any("Compose", *c))
 	return c
 }
@@ -49,12 +50,12 @@ func (c *Compose) ComposeFile(
 	default:
 	}
 
-	// 1. 单文件场景特殊处理（核心优化）
+	// 1. Special handling for single-file scenario (core optimization)
 	if len(parts) == 1 {
-		// 设置GCP凭证环境变量
+		// Set GCP credential env var
 		os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", credFile)
 
-		// 创建GCS客户端
+		// Create GCS client
 		ctx_, cancel := context.WithTimeout(ctx, 1*time.Minute)
 		defer cancel()
 
@@ -68,7 +69,7 @@ func (c *Compose) ComposeFile(
 		bkt := client.Bucket(bucket)
 		partName := parts[0]
 
-		// 1.1 单文件同名：无需操作，直接返回
+		// 1.1 Single file same name: No operation needed, return directly
 		if partName == objectName {
 			logger.Info("single file name matches final name, skip compose",
 				slog.String("pre", pre),
@@ -76,7 +77,7 @@ func (c *Compose) ComposeFile(
 			return nil
 		}
 
-		// 1.2 单文件不同名：复制+成功后删除源文件（带容错）
+		// 1.2 Single file different name: Copy + delete source after success (with fault tolerance)
 		logger.Info("start copy single file to final location",
 			slog.String("pre", pre),
 			slog.String("from", partName),
@@ -97,7 +98,7 @@ func (c *Compose) ComposeFile(
 			slog.String("from", partName),
 			slog.String("to", objectName))
 
-		// 复制成功后删除源文件（容错：删除失败仅告警，不中断流程）
+		// Delete source file after copy success (fault tolerance: delete failure only warns, doesn't interrupt)
 		if delErr := bkt.Object(partName).Delete(ctx_); delErr != nil {
 			logger.Warn("delete single source file failed (copy success)",
 				slog.String("pre", pre),
@@ -115,9 +116,9 @@ func (c *Compose) ComposeFile(
 		return nil
 	}
 
-	// 2. 多文件场景：原有树形合成逻辑（保留）
+	// 2. Multi-file scenario: Original tree compose logic (preserved)
 	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", credFile)
-	// 创建GCS客户端
+	// Create GCS client
 	//ctx_, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	//defer cancel()
 	client, err := storage.NewClient(ctx)
@@ -128,11 +129,11 @@ func (c *Compose) ComposeFile(
 	defer client.Close()
 
 	bkt := client.Bucket(bucket)
-	current := parts // 如需排序可打开注释：util.SortPartStrings(parts)
+	current := parts // Uncomment to sort: util.SortPartStrings(parts)
 	level := 0
-	var tempObjects []string // 记录所有临时生成的合成文件
+	var tempObjects []string // Track all temp compose files
 
-	// 树形合成：每次合并最多32个分片（GCS Compose API限制）
+	// Tree compose: merge up to 32 chunks each time (GCS Compose API limit)
 	for len(current) > 1 {
 		var next []string
 
@@ -144,13 +145,13 @@ func (c *Compose) ComposeFile(
 			group := current[i:end]
 			tmpObjectName := fmt.Sprintf("%s.compose.%d.%d", objectName, level, i)
 
-			// 构建待合成的对象列表
+			// Build list of objects to compose
 			var objs []*storage.ObjectHandle
 			for _, p := range group {
 				objs = append(objs, bkt.Object(p))
 			}
 
-			// 执行合成操作
+			// Execute compose operation
 			if _, err := bkt.Object(tmpObjectName).ComposerFrom(objs...).Run(ctx); err != nil {
 				logger.Error("compose temp object failed",
 					slog.String("pre", pre),
@@ -174,14 +175,14 @@ func (c *Compose) ComposeFile(
 		level++
 	}
 
-	// 3. 多文件合成最终步骤：临时文件→最终文件
+	// 3. Multi-file compose final step: temp file -> final file
 	if err := finalizeObject(ctx, bkt, current[0], objectName); err != nil {
 		logger.Error("finalize object failed", slog.String("pre", pre), slog.Any("err", err))
 		return fmt.Errorf("finalize object failed: %w", err)
 	}
 
-	// 4. 清理多文件场景的临时文件和分片
-	// 4.1 删除中间临时文件（排除已在finalizeObject删除的最终临时文件）
+	// 4. Cleanup temp files and parts for multi-file scenario
+	// 4.1 Delete intermediate temp files (exclude final temp file deleted in finalizeObject)
 	for _, tmp := range tempObjects {
 		if tmp != current[0] {
 			if delErr := bkt.Object(tmp).Delete(ctx); delErr != nil {
@@ -193,7 +194,7 @@ func (c *Compose) ComposeFile(
 		}
 	}
 
-	// 4.2 删除原始分片文件
+	// 4.2 Delete original part files
 	for _, p := range parts {
 		if delErr := bkt.Object(p).Delete(ctx); delErr != nil {
 			logger.Warn("delete part object failed",
@@ -209,10 +210,10 @@ func (c *Compose) ComposeFile(
 	return nil
 }
 
-// finalizeObject 把临时文件复制到最终位置并删除临时文件
-// 仅用于多文件合成的最终步骤
+// finalizeObject Copy temp file to final location and delete temp file
+// Only used for final step of multi-file compose
 func finalizeObject(ctx context.Context, bkt *storage.BucketHandle, tempName, finalName string) error {
-	// 复制临时文件到最终文件
+	// Copy temp file to final file
 	_, err := bkt.Object(finalName).
 		CopierFrom(bkt.Object(tempName)).
 		Run(ctx)
@@ -220,7 +221,7 @@ func finalizeObject(ctx context.Context, bkt *storage.BucketHandle, tempName, fi
 		return fmt.Errorf("copy temp to final failed: %w", err)
 	}
 
-	// 删除临时文件
+	// Delete temp file
 	if err := bkt.Object(tempName).Delete(ctx); err != nil {
 		return fmt.Errorf("delete temp object failed: %w", err)
 	}

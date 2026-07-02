@@ -1,14 +1,15 @@
 package gcs_client
 
 import (
-	"cloud.google.com/go/storage"
 	"context"
 	"fmt"
-	"golang.org/x/time/rate"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+
+	"cloud.google.com/go/storage"
+	"golang.org/x/time/rate"
 )
 
 type Upload struct {
@@ -17,18 +18,18 @@ type Upload struct {
 	credFile     string
 }
 
-// NewUpload 仿照统一风格初始化新版Upload结构体
+// NewUpload Initialize new Upload struct following unified style
 func NewUpload(
 	localBaseDir, bucketName, credFile string,
-	pre string, // 日志前缀（和之前保持一致）
-	logger *slog.Logger, // 日志实例（和之前保持一致）
+	pre string, // Log prefix (keep consistent with previous)
+	logger *slog.Logger, // Log instance (keep consistent with previous)
 ) *Upload {
 	u := &Upload{
 		localBaseDir: localBaseDir,
 		bucketName:   bucketName,
 		credFile:     credFile,
 	}
-	// 和其他初始化函数完全一致的日志打印逻辑
+	// Same log printing logic as other init functions
 	logger.Info("NewUpload", slog.String("pre", pre), slog.Any("Upload", *u))
 	return u
 }
@@ -40,13 +41,13 @@ func (u *Upload) UploadFile(
 	hops string,
 	rateLimiter *rate.Limiter,
 	reader io.ReadCloser,
-	inMemory bool, // 新增：true=内存流式上传，false=本地文件上传
-	pre string, // 补充：日志前缀（关键追溯字段）
+	inMemory bool, // New: true=in-memory streaming upload, false=local file upload
+	pre string, // Added: log prefix (key tracing field)
 	logger *slog.Logger,
 ) error {
 
 	logger.Info("UploadToGCSbyClient", slog.String("pre", pre), slog.String("objectName", objectName))
-	// 仅在「上传开始前」检查ctx是否已取消（避免启动无效上传）
+	// Check ctx cancellation only before upload starts (avoid invalid upload)
 	select {
 	case <-ctx.Done():
 		err := fmt.Errorf("upload canceled before start: %w", ctx.Err())
@@ -55,7 +56,7 @@ func (u *Upload) UploadFile(
 	default:
 	}
 
-	// 日志区分上传模式（添加pre前缀）
+	// Log to distinguish upload mode (add pre prefix)
 	if inMemory {
 		logger.Info("Uploading data to GCS (in-memory mode, no local file)",
 			slog.String("pre", pre),
@@ -69,11 +70,11 @@ func (u *Upload) UploadFile(
 			slog.String("objectName", objectName))
 	}
 
-	// 设置GCS凭证
+	// Set GCS credentials
 	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", u.credFile)
 
-	// 创建GCS客户端（传入ctx，支持取消客户端创建过程）
-	//ctx_, cancel := context.WithTimeout(ctx, 1*time.Minute) // 避免卡住
+	// Create GCS client (pass ctx, support cancel during client creation)
+	//ctx_, cancel := context.WithTimeout(ctx, 1*time.Minute) // Avoid hanging
 	//defer cancel()
 	client, err := storage.NewClient(ctx)
 	if err != nil {
@@ -82,17 +83,17 @@ func (u *Upload) UploadFile(
 			slog.Any("err", err))
 		return fmt.Errorf("failed to create storage client: %w", err)
 	}
-	defer client.Close() // 确保客户端关闭
+	defer client.Close() // Ensure client closes
 
-	// 获取bucket handle
+	// Get bucket handle
 	bucket := client.Bucket(u.bucketName)
 
-	// 初始化GCS Writer（传入外层ctx，不重新创建超时）
+	// Initialize GCS Writer (pass outer ctx, don't recreate timeout)
 	wc := bucket.Object(objectName).NewWriter(ctx)
 	wc.StorageClass = "STANDARD"
 	wc.ContentType = "application/octet-stream"
 	defer func() {
-		// 确保Writer关闭，捕获关闭错误
+		// Ensure Writer closes, capture close error
 		if err := wc.Close(); err != nil {
 			logger.Error("Failed to close GCS writer",
 				slog.String("pre", pre),
@@ -100,7 +101,7 @@ func (u *Upload) UploadFile(
 		}
 	}()
 
-	// 模式1：inMemory=true → 从传入的Reader流式上传
+	// Mode 1: inMemory=true -> stream upload from passed Reader
 	if inMemory {
 		if reader == nil {
 			err := fmt.Errorf("in-memory mode requires non-nil dataReader")
@@ -108,7 +109,7 @@ func (u *Upload) UploadFile(
 			return err
 		}
 
-		// 保留原阻塞式io.Copy，等待拷贝完成
+		// Keep original blocking io.Copy, wait for copy completion
 		if _, err := io.Copy(wc, reader); err != nil {
 			logger.Error("Failed to copy in-memory data to bucket",
 				slog.String("pre", pre),
@@ -123,10 +124,10 @@ func (u *Upload) UploadFile(
 		return nil
 	}
 
-	// 模式2：inMemory=false → 从本地文件上传
+	// Mode 2: inMemory=false -> upload from local file
 	localFilePath := filepath.Join(u.localBaseDir, objectName)
 
-	// 打开本地文件
+	// Open local file
 	f, err := os.Open(localFilePath)
 	if err != nil {
 		logger.Error("Failed to open local file",
@@ -137,7 +138,7 @@ func (u *Upload) UploadFile(
 	}
 	defer f.Close()
 
-	// 保留原阻塞式io.Copy，等待拷贝完成
+	// Keep original blocking io.Copy, wait for copy completion
 	if _, err := io.Copy(wc, f); err != nil {
 		logger.Error("Failed to copy local file to bucket",
 			slog.String("pre", pre),

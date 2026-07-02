@@ -1,7 +1,6 @@
 package gcs
 
 import (
-	"cloud.google.com/go/storage"
 	"context"
 	"fmt"
 	"io"
@@ -9,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"cloud.google.com/go/storage"
 )
 
 type Download struct {
@@ -36,10 +37,10 @@ func (d *Download) DownloadFile(
 	start int64,
 	length int64,
 	bs string,
-	inMemory bool, // 新增：true=不落盘返回Reader，false=落盘
+	inMemory bool, // New: true=return Reader without disk write, false=write to disk
 	pre string,
 	logger *slog.Logger,
-) (io.ReadCloser, error) { // 返回io.ReadCloser（兼容两种模式）
+) (io.ReadCloser, error) { // Return io.ReadCloser (supports both modes)
 
 	objectName := filename
 
@@ -51,7 +52,7 @@ func (d *Download) DownloadFile(
 	default:
 	}
 
-	// 日志区分模式+完整/分片读取
+	// Log to distinguish mode + full/range read
 	if inMemory {
 		if length <= 0 {
 			logger.Info("Reading full file from GCS (in-memory mode, no disk write)",
@@ -85,12 +86,12 @@ func (d *Download) DownloadFile(
 		}
 	}
 
-	// 设置GCS凭证
+	// Set GCS credentials
 	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", d.credFile)
 
-	// 创建GCS客户端
+	// Create GCS client
 
-	// 创建带超时的上下文
+	// Create context with timeout
 	//ctx_, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	//defer cancel()
 
@@ -99,11 +100,11 @@ func (d *Download) DownloadFile(
 		return nil, fmt.Errorf("create storage client failed: %w", err)
 	}
 
-	// 获取Bucket和Object
+	// Get Bucket and Object
 	bucket := client.Bucket(d.bucketName)
 	obj := bucket.Object(objectName)
 
-	// 创建Reader（完整/分片读取）
+	// Create Reader (full/range read)
 	var rc *storage.Reader
 	if length <= 0 {
 		rc, err = obj.NewReader(ctx)
@@ -115,7 +116,7 @@ func (d *Download) DownloadFile(
 		return nil, fmt.Errorf("create object reader failed: %w", err)
 	}
 
-	// 模式1：inMemory=true → 返回流式Reader（不落盘）
+	// Mode 1: inMemory=true -> return streaming Reader (no disk write)
 	if inMemory {
 		return &gcsReaderWrapper{
 			Reader: rc,
@@ -124,38 +125,38 @@ func (d *Download) DownloadFile(
 		}, nil
 	}
 
-	// 模式2：inMemory=false → 落盘到本地文件
+	// Mode 2: inMemory=false -> write to local file
 	defer func() {
 		rc.Close()
 		//cancel()
 		client.Close()
 	}()
 
-	// 拼接本地文件路径
+	// Build local file path
 	localFilePath := filepath.Join(d.localBaseDir, newFilename)
-	// 创建本地目录
+	// Create local directory
 	if err := os.MkdirAll(d.localBaseDir, 0755); err != nil {
 		return nil, fmt.Errorf("create local dir failed: %w", err)
 	}
-	// 创建本地文件
+	// Create local file
 	f, err := os.Create(localFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("create local file failed: %w", err)
 	}
 	defer f.Close()
 
-	// 写入本地文件
+	// Write to local file
 	if _, err := io.Copy(f, rc); err != nil {
 		return nil, fmt.Errorf("copy to local file failed: %w", err)
 	}
 
-	// 落盘模式返回本地文件的Reader（方便调用方后续读取）
+	// Disk mode returns Reader of local file (convenient for caller)
 	localFileReader, err := os.Open(localFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("open local file failed: %w", err)
 	}
 
-	// 日志反馈结果
+	// Log result
 	if length <= 0 {
 		logger.Info("Full file download success (disk mode)",
 			slog.String("pre", pre),
@@ -173,14 +174,14 @@ func (d *Download) DownloadFile(
 	return localFileReader, nil
 }
 
-// gcsReaderWrapper 封装 storage.Reader + 资源清理逻辑（内存模式用）
+// gcsReaderWrapper Wraps storage.Reader + resource cleanup (for memory mode)
 type gcsReaderWrapper struct {
 	*storage.Reader
 	//cancel context.CancelFunc
 	client *storage.Client
 }
 
-// Close 关闭所有关联资源（调用方必须调用）
+// Close Close all associated resources (caller must call)
 func (w *gcsReaderWrapper) Close() error {
 	var errStr []string
 	if err := w.Reader.Close(); err != nil {
