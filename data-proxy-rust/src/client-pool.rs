@@ -6,21 +6,21 @@ use std::time::Duration;
 
 type HttpClient = Client<HttpsConnector<hyper::client::HttpConnector>>;
 
-// 客户端池（全局）—— 修复静态初始化错误
+// Client pool (global) - Fixed static initialization error
 static CLIENT_POOL: LazyLock<RwLock<HashMap<String, Arc<HttpClient>>>> = LazyLock::new(|| {
     RwLock::new(HashMap::new())
 });
 
-/// 获取 HTTP/HTTPS 客户端（复用连接池，对应 Go 的 getClient）
+/// Get HTTP/HTTPS client (connection pool reuse, equivalent to Go's getClient)
 pub fn get_client(target: &str, _scheme: &str) -> Arc<HttpClient> {
-    // 读锁检查是否存在
+    // Read lock to check existence
     if let Ok(read_lock) = CLIENT_POOL.read() {
         if let Some(client) = read_lock.get(target) {
             return Arc::clone(client);
         }
     }
 
-    // 创建新客户端
+    // Create new client
     let https = HttpsConnector::new();
     let client = Client::builder()
         .pool_max_idle_per_host(50)
@@ -31,7 +31,7 @@ pub fn get_client(target: &str, _scheme: &str) -> Arc<HttpClient> {
 
     let client_arc = Arc::new(client);
 
-    // 写锁插入池
+    // Write lock to insert into pool
     if let Ok(mut write_lock) = CLIENT_POOL.write() {
         write_lock.insert(target.to_string(), Arc::clone(&client_arc));
     }

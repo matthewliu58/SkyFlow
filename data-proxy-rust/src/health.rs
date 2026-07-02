@@ -4,13 +4,13 @@ use crate::config::STATUS;
 use crate::utils::generate_random_letters;
 use tracing::{info, warn};
 
-/// 健康状态切换查询参数
+/// Health state change query parameters
 #[derive(Deserialize, Debug)]
 pub struct HealthStateQuery {
     set: Option<String>,
 }
 
-/// 健康状态切换接口（/healthStateChange）
+/// Health state change endpoint (/healthStateChange)
 pub async fn health_state_change(Query(params): Query<HealthStateQuery>) -> (StatusCode, &'static str) {
     let pre = generate_random_letters(5);
     info!(%pre, "healthStateChange");
@@ -18,7 +18,7 @@ pub async fn health_state_change(Query(params): Query<HealthStateQuery>) -> (Sta
     let set = params.set.unwrap_or_else(|| "on".to_string());
     info!(%pre, "get switch val: {}", set);
 
-    // 修改状态（加锁）
+    // Modify status (with lock)
     if let Ok(mut status_lock) = STATUS.write() {
         *status_lock = if set == "off" {
             "off".to_string()
@@ -33,11 +33,11 @@ pub async fn health_state_change(Query(params): Query<HealthStateQuery>) -> (Sta
     (StatusCode::OK, "success")
 }
 
-/// 健康检查接口（/health）
+/// Health check endpoint (/health)
 pub async fn health() -> (StatusCode, &'static str) {
     let pre = generate_random_letters(5);
 
-    // 读取状态（加锁）
+    // Read status (with lock)
     let status = match STATUS.read() {
         Ok(lock) => lock.clone(),
         Err(e) => {

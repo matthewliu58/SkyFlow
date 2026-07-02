@@ -276,7 +276,7 @@ func main() {
 	router := gin.Default()
 	router.GET("/healthStateChange", health.HealthStateChange(logger))
 	router.GET("/health", health.Health(logger))
-	router.GET("/queueInfo", queue.GetCongestionInfo(logger))
+	router.GET("/queueInfo", queue.GetQueueInfo(logger))
 	router.NoRoute(func(c *gin.Context) { handler(logger)(c.Writer, c.Request) })
 
 	port := "8095"

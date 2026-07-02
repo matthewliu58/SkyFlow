@@ -1,3 +1,3 @@
-# 服务配置
+# Service configuration
 port = "8095"
 mem = 1

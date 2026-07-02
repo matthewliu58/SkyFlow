@@ -29,7 +29,7 @@ type ProxyStatus struct {
 	CacheUsageRatio   float64 `json:"cache_usage_ratio"`  // Cache usage ratio [0,1]
 }
 
-func CheckCongestion(allBufferSize int, pre string, logger *slog.Logger) ProxyStatus {
+func CheckQueue(allBufferSize int, pre string, logger *slog.Logger) ProxyStatus {
 
 	s := ProxyStatus{}
 
@@ -62,10 +62,10 @@ func CheckCongestion(allBufferSize int, pre string, logger *slog.Logger) ProxySt
 }
 
 // GetCongestionInfo get congestion status /getCongestionInfo
-func GetCongestionInfo(logger *slog.Logger) gin.HandlerFunc {
+func GetQueueInfo(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		pre := util.GenerateRandomLetters(5)
-		info := CheckCongestion(2*BufferSize, pre, logger)
+		info := CheckQueue(2*BufferSize, pre, logger)
 		c.JSON(http.StatusOK, info)
 	}
 }

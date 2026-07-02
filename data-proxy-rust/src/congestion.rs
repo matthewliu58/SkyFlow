@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 
 // use libc;
 
-/// 代理状态结构体（对应 Go 的 ProxyStatus）
+/// Proxy status struct (equivalent to Go's ProxyStatus)
 #[derive(Debug, Serialize)]
 pub struct ProxyStatus {
     pub active_connections: i64,
@@ -16,7 +16,7 @@ pub struct ProxyStatus {
     pub cache_usage_ratio: f64,
 }
 
-/// 检查拥塞状态（对应 Go 的 CheckCongestion）
+/// Check congestion status (equivalent to Go's CheckCongestion)
 pub fn check_congestion(pre: &str, all_buffer_size: usize) -> ProxyStatus {
     let mut status = ProxyStatus {
         active_connections: 0,
@@ -26,23 +26,23 @@ pub fn check_congestion(pre: &str, all_buffer_size: usize) -> ProxyStatus {
         cache_usage_ratio: 0.0,
     };
 
-    // 当前进程已用内存 (RSS)
+    // Current process memory usage (RSS)
     status.process_mem = get_process_rss();
 
-    // 活跃连接数
+    // Active connection count
     let active = ACTIVE_TRANSFERS.load(std::sync::atomic::Ordering::SeqCst);
     if active <= 0 {
         return status;
     }
     status.active_connections = active;
 
-    // 平均每连接内存
-    let per_conn_cache = all_buffer_size * 1024; // 每连接 KB -> Bytes
+    // Average memory per connection
+    let per_conn_cache = all_buffer_size * 1024; // KB -> Bytes per connection
     let avg_cache = status.process_mem as f64 / active as f64;
     status.avg_cache_per_conn = avg_cache;
     status.cache_usage_ratio = avg_cache / per_conn_cache as f64;
 
-    // 日志输出 - info 风格
+    // Log output - info level
     info!(
         proxy_mem = status.process_mem,
         active_connections = active,
@@ -51,7 +51,7 @@ pub fn check_congestion(pre: &str, all_buffer_size: usize) -> ProxyStatus {
         "Proxy avg cache"
     );
 
-    // 拥塞警告
+    // Congestion warning
     if status.cache_usage_ratio > WARNING_LEVEL_FOR_BUFFER as f64 {
         warn!(
             WarningLevelforBuffer = WARNING_LEVEL_FOR_BUFFER,
@@ -60,7 +60,7 @@ pub fn check_congestion(pre: &str, all_buffer_size: usize) -> ProxyStatus {
         );
     }
 
-    // 完整状态日志
+    // Full status log
     info!(
         pre = pre,
         status = ?status,
@@ -70,7 +70,7 @@ pub fn check_congestion(pre: &str, all_buffer_size: usize) -> ProxyStatus {
     status
 }
 
-// 读取【你设置的进程最大内存】（字节）
+// Read the maximum memory limit for the process (bytes)
 // fn get_process_max_memory() -> u64 {
 //     let mut rlim = libc::rlimit {
 //         rlim_cur: 0,
@@ -81,7 +81,7 @@ pub fn check_congestion(pre: &str, all_buffer_size: usize) -> ProxyStatus {
 //         libc::getrlimit(libc::RLIMIT_AS, &mut rlim);
 //     }
 //
-//     // 如果是无限制，返回 0（避免除0错误）
+//     // If unlimited, return 0 (avoid division by zero)
 //     if rlim.rlim_cur == libc::RLIM_INFINITY {
 //         0
 //     } else {
@@ -89,9 +89,9 @@ pub fn check_congestion(pre: &str, all_buffer_size: usize) -> ProxyStatus {
 //     }
 // }
 
-// 获取【当前进程已用内存】（字节）
+// Get current process memory usage (bytes)
 // pub fn get_process_used_memory() -> u64 {
-//     // 全局单例 System，避免重复创建
+//     // Global singleton System to avoid repeated creation
 //     use once_cell::sync::Lazy;
 //     static SYS: Lazy<tokio::sync::Mutex<sysinfo::System>> =
 //         Lazy::new(|| tokio::sync::Mutex::new(sysinfo::System::new_all()));

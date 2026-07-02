@@ -7,20 +7,20 @@ use tracing_subscriber::{
 use std::fs::OpenOptions;
 use std::path::Path;
 
-/// 初始化日志（对应 Go 的自定义 slog Handler）
+/// Initialize logger (equivalent to Go's custom slog Handler)
 pub fn init_logger() -> Result<(), std::io::Error> {
-    // 创建日志目录
+    // Create log directory
     let log_dir = "log";
     std::fs::create_dir_all(log_dir)?;
 
-    // 打开日志文件
+    // Open log file
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
         .write(true)
         .open(Path::new(log_dir).join("app.log"))?;
 
-    // 配置日志订阅器（包含文件名、行号、函数名）
+    // Configure log subscriber (includes filename, line number, function name)
     tracing_subscriber::registry()
         .with(
             EnvFilter::from_default_env()
@@ -34,7 +34,7 @@ pub fn init_logger() -> Result<(), std::io::Error> {
                 .with_writer(log_file)
                 .with_file(true)
                 .with_line_number(true)
-                // 删掉这行：with_function_name(true) → 新版不支持
+                // Remove this line: with_function_name(true) → not supported in newer version
                 .with_span_events(FmtSpan::CLOSE),
         )
         .init();

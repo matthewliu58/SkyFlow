@@ -1,7 +1,7 @@
 use rand::Rng;
 use std::process;
 
-/// 生成指定长度的随机字母（对应 Go 的 GenerateRandomLetters）
+/// Generate random letters of specified length (equivalent to Go's GenerateRandomLetters)
 pub fn generate_random_letters(length: usize) -> String {
     let mut rng = rand::thread_rng();
     const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -13,7 +13,7 @@ pub fn generate_random_letters(length: usize) -> String {
         .collect()
 }
 
-/// 拆分 x-hops 字符串（对应 Go 的 splitHops）
+/// Split x-hops string (equivalent to Go's splitHops)
 pub fn split_hops(hops_str: &str) -> Vec<String> {
     hops_str
         .split(',')
@@ -22,7 +22,7 @@ pub fn split_hops(hops_str: &str) -> Vec<String> {
         .collect()
 }
 
-/// 获取当前进程 ID
+/// Get current process ID
 pub fn get_pid() -> u32 {
     process::id()
 }

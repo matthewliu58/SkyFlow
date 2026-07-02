@@ -14,7 +14,7 @@ use std::str::FromStr;
 // use bytes::Bytes;
 use futures_util::stream::StreamExt;
 
-/// 核心代理处理函数（对应 Go 的 handler）
+/// Core proxy handler function (equivalent to Go's handler)
 pub async fn proxy_handler(req: Request<Body>) -> impl IntoResponse {
     let pre = req.headers()
         .get("X-Pre")
@@ -26,7 +26,7 @@ pub async fn proxy_handler(req: Request<Body>) -> impl IntoResponse {
     let uri = req.uri().clone();
     let method = req.method().clone();
 
-    // 提取 headers
+    // Extract headers
     let hops_str = headers.get(HEADER_HOPS)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
@@ -47,20 +47,20 @@ pub async fn proxy_handler(req: Request<Body>) -> impl IntoResponse {
         "Received request"
     );
 
-    // 校验 hops
+    // Validate hops
     if hops.is_empty() {
         warn!(%pre, "Missing x-hops header");
         return (StatusCode::BAD_REQUEST, "Missing x-hops header").into_response();
     }
 
-    // 计算新索引
+    // Calculate new index
     let new_index = current_index + 1;
     if new_index > hops_len {
         warn!(%pre, new_index, hops_len, "Forward index out of range");
         return (StatusCode::from_u16(SERVER_ERROR_CODE).unwrap(), "Forward index out of range").into_response();
     }
 
-    // 解析目标 hop
+    // Parse target hop
     let target_hop = &hops[new_index - 1];
     let parts: Vec<&str> = target_hop.split(':').collect();
     if parts.len() != 2 {
@@ -70,7 +70,7 @@ pub async fn proxy_handler(req: Request<Body>) -> impl IntoResponse {
     let target_ip = parts[0];
     let target_port = parts[1];
 
-    // 最后一跳逻辑：确定 scheme 和 method
+    // Last hop logic: determine scheme and method
     let mut scheme = "http";
     let mut forward_method = method.clone();
     if new_index == hops_len {
@@ -83,7 +83,7 @@ pub async fn proxy_handler(req: Request<Body>) -> impl IntoResponse {
         }
     }
 
-    // 构建目标 URL
+    // Build target URL
     let target_url = format!(
         "{}://{}{}",
         scheme,
@@ -93,16 +93,16 @@ pub async fn proxy_handler(req: Request<Body>) -> impl IntoResponse {
     );
     info!(%pre, target_url, "Forwarding to target");
 
-    // 获取客户端
+    // Get client
     let target = format!("{}:{}", target_ip, target_port);
     let client = get_client(&target, scheme);
 
-    // ====================== 修复 1：原版逻辑完全保留 ======================
+    // ====================== Fix 1: Preserve original logic completely ======================
     let mut forward_req = Request::new(req.into_body());
     *forward_req.uri_mut() = Uri::from_str(&target_url).unwrap();
     *forward_req.method_mut() = forward_method;
 
-    // 复制 headers + 设置新 index
+    // Copy headers + set new index
     let forward_headers = forward_req.headers_mut();
     forward_headers.extend(headers.iter().map(|(k, v)| (k.clone(), v.clone())));
     forward_headers.insert(
@@ -112,7 +112,7 @@ pub async fn proxy_handler(req: Request<Body>) -> impl IntoResponse {
 
     info!(%pre, headers = ?forward_headers, "Forwarded request headers");
 
-    // 发送请求
+    // Send request
     let resp = match client.request(forward_req).await {
         Ok(resp) => resp,
         Err(e) => {
@@ -124,22 +124,22 @@ pub async fn proxy_handler(req: Request<Body>) -> impl IntoResponse {
         }
     };
 
-    // 构建响应
+    // Build response
     let mut response = Response::new(Body::empty());
     *response.status_mut() = resp.status();
 
-    // 复制响应 headers
+    // Copy response headers
     let resp_headers = response.headers_mut();
     resp_headers.extend(resp.headers().iter().map(|(k, v)| (k.clone(), v.clone())));
 
     info!(%pre, headers = ?resp.headers(), "Forwarded response headers");
 
-    // 处理响应体（计数 + 拷贝）
+    // Process response body (count + copy)
     ACTIVE_TRANSFERS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut body = resp.into_body();
     let mut response_body = Vec::new();
 
-    // ====================== 修复 2：原版逻辑完全保留 ======================
+    // ====================== Fix 2: Preserve original logic completely ======================
     while let Some(chunk) = body.next().await {
         match chunk {
             Ok(bytes) => response_body.extend_from_slice(&bytes),
