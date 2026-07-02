@@ -2,9 +2,8 @@ package main
 
 import (
 	"context"
-	"data-plane/pkg/envoy-manager"
-	"data-plane/pkg/report-info/reporter"
 	"data-plane/probing"
+	"data-plane/telemetry"
 	"data-plane/util"
 	"encoding/json"
 	"github.com/gin-gonic/gin"
@@ -53,18 +52,6 @@ func (h *SourceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 func (h *SourceHandler) WithGroup(name string) slog.Handler {
 	return &SourceHandler{handler: h.handler.WithGroup(name)}
-}
-
-func InitEnvoy(logger, logger1 *slog.Logger) {
-	// 创建启动器
-	starter := envoy_manager.NewEnvoyStarter()
-
-	// 启动Envoy
-	pid, err := starter.StartEnvoy(logger, logger1)
-	if err != nil {
-		logger.Error("Envoy启动失败: %v", err)
-	}
-	logger.Info("Envoy启动成功，PID: %d", pid)
 }
 
 var (
@@ -173,7 +160,7 @@ func main() {
 	})
 
 	// 3. 初始化上报器
-	go reporter.ReportCycle(util.Config_.ControlHost, logPre, logger)
+	go telemetry.ReportCycle(util.Config_.ControlHost, logPre, logger)
 
 	//启动探测逻辑
 	cfg := probing.Config{

@@ -1,8 +1,9 @@
-package reporter
+package telemetry
 
 import (
 	"bytes"
-	"data-plane/pkg/report-info/collector"
+	"data-plane/telemetry/collector"
+	"data-plane/telemetry/model"
 	"data-plane/util"
 	"encoding/json"
 	"fmt"
@@ -10,23 +11,22 @@ import (
 	"net/http"
 	"time"
 
-	model "data-plane/pkg/report-info"
 	"github.com/google/uuid"
 )
 
-// 常量配置（写死）
+// Constants (hardcoded)
 const (
 	//ControlHost    = "http://34.69.185.247:8081"
-	ReportURL      = "/api/v1/vm/receive" // 控制平面地址
-	ReportInterval = 10 * time.Second     // 上报周期
+	ReportURL      = "/api/v1/vm/receive"
+	ReportInterval = 10 * time.Second
 )
 
-// HTTPReporter HTTP上报器
+// HTTPReporter HTTP reporter
 type HTTPReporter struct {
 	client *http.Client
 }
 
-// NewHTTPReporter 初始化上报器
+// NewHTTPReporter initialize reporter
 func NewHTTPReporter() *HTTPReporter {
 	return &HTTPReporter{
 		client: &http.Client{
@@ -35,62 +35,63 @@ func NewHTTPReporter() *HTTPReporter {
 	}
 }
 
-// Report 上报VM信息（按ApiResponse格式封装）
+// Report reports VM info (wrapped in ApiResponse format)
 func (r *HTTPReporter) Report(controlHost, pre string, vmReport *model.VMReport) error {
-	// 1. 填充ReportID（若为空）
+	// 1. Fill ReportID (if empty)
 	if vmReport.ReportID == "" {
 		vmReport.ReportID = uuid.NewString()
 	}
 
-	// 2. 构造外层ApiResponse请求体
+	// 2. Build outer ApiResponse request body
 	reqBody := model.ApiResponse{
-		Code: 200, // 客户端默认填200
-		Msg:  "VM信息上报请求",
+		Code: 200,
+		Msg:  "VM info report request",
 		Data: vmReport,
 	}
 
-	// 3. 序列化为JSON
+	// 3. Serialize to JSON
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return err
 	}
 
-	// 4. 发送POST请求
+	// 4. Send POST request
 	resp, err := r.client.Post(controlHost+ReportURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	// 5. 解析响应（可选，验证上报结果）
+	// 5. Parse response (optional, verify report result)
 	var respBody model.ApiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
 		return err
 	}
 
 	if respBody.Code != 200 {
-		return fmt.Errorf("上报失败：%s", respBody.Msg)
+		return fmt.Errorf("report failed: %s", respBody.Msg)
 	}
 
 	return nil
 }
 
+// ReportCycle starts the periodic VM info reporting loop
 func ReportCycle(controlHost, pre string, logger *slog.Logger) {
-	// 1. 初始化采集器和上报器
+	// 1. Initialize collector and reporter
 	vmCollector := collector.NewVMCollector()
 	httpReporter := NewHTTPReporter()
 
-	// 2. 启动定时上报任务
+	// 2. Start periodic reporting
 	ticker := time.NewTicker(ReportInterval)
 	defer ticker.Stop()
 
 	logger.Info(
-		"数据平面启动，开始定时上报", slog.String("pre", pre),
+		"Data plane started, beginning periodic reporting", slog.String("pre", pre),
 		slog.Duration("report_interval", ReportInterval),
 		slog.String("report_url", controlHost+ReportURL),
 	)
 
-	// 3. 立即执行一次上报，然后按周期执行
+	// 3. Execute once immediately then on interval
 	//reportOnce(vmCollector, httpReporter, logger)
 
 	for range ticker.C {
@@ -98,28 +99,28 @@ func ReportCycle(controlHost, pre string, logger *slog.Logger) {
 	}
 }
 
-// reportOnce 单次上报逻辑
+// reportOnce single report execution
 func reportOnce(controlHost string, collector *collector.VMCollector, reporter *HTTPReporter, logger *slog.Logger) {
 
 	pre := util.GenerateRandomLetters(5)
 
-	// 1. 采集信息
-	logger.Info("开始采集VM信息...", slog.String("pre", pre))
+	// 1. Collect info
+	logger.Info("Collecting VM info...", slog.String("pre", pre))
 	vmReport, err := collector.Collect(pre, logger)
 	if err != nil {
-		logger.Error("采集失败", slog.String("pre", pre), slog.Any("err", err))
+		logger.Error("Collection failed", slog.String("pre", pre), slog.Any("err", err))
 		return
 	}
 
-	// 2. 上报信息
+	// 2. Report info
 	b, _ := json.Marshal(vmReport)
-	logger.Info("开始上报VM信息", slog.String("pre", pre), slog.String("data", string(b)))
+	logger.Info("Reporting VM info", slog.String("pre", pre), slog.String("data", string(b)))
 
 	err = reporter.Report(controlHost, pre, vmReport)
 	if err != nil {
-		logger.Error("上报失败", slog.String("pre", pre), slog.Any("err", err))
+		logger.Error("Report failed", slog.String("pre", pre), slog.Any("err", err))
 		return
 	}
 
-	logger.Info("上报成功", slog.String("pre", pre), slog.String("ReportID", vmReport.ReportID))
+	logger.Info("Report success", slog.String("pre", pre), slog.String("ReportID", vmReport.ReportID))
 }

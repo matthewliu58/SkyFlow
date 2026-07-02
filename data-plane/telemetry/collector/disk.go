@@ -1,7 +1,7 @@
 package collector
 
 import (
-	model "data-plane/pkg/report-info"
+	model "data-plane/telemetry/model"
 	"github.com/shirou/gopsutil/v3/disk"
 )
 

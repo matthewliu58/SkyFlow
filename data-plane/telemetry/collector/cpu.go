@@ -1,9 +1,9 @@
 package collector
 
 import (
+	model "data-plane/telemetry/model"
 	"time"
 
-	model "data-plane/pkg/report-info"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/load"
 )

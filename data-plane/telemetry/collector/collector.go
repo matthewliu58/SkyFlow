@@ -1,7 +1,7 @@
 package collector
 
 import (
-	model "data-plane/pkg/report-info"
+	model "data-plane/telemetry/model"
 	"encoding/json"
 	"log/slog"
 	"time"
@@ -48,16 +48,13 @@ func (c *VMCollector) Collect(pre string, logger *slog.Logger) (*model.VMReport,
 		return nil, err
 	}
 
-	linksCong := BuildLinkCongestion()
+	link := collectLink()
 
 	//hostname, _ := os.Hostname()
 
-	// 一站式获取缓冲统计
-	//envoyMemInfo := GetEnvoyFullBufferStats(logger)
-
-	cong, err := GetCongestionInfo()
+	queue, err := collectQueue()
 	if err != nil {
-		logger.Warn("获取congestion信息失败：%v\n", err)
+		logger.Warn("Failed to get congestion info", slog.Any("err", err))
 	}
 
 	val := &model.VMReport{
@@ -70,9 +67,8 @@ func (c *VMCollector) Collect(pre string, logger *slog.Logger) (*model.VMReport,
 		Network:     networkInfo,
 		OS:          osInfo,
 		Process:     processInfo,
-		//EnvoyMem:    envoyMemInfo,
-		Congestion:      cong,
-		LinksCongestion: linksCong,
+		Queue:       queue,
+		Link:        link,
 	}
 
 	b, _ := json.Marshal(val)

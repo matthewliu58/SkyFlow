@@ -1,9 +1,9 @@
 package collector
 
 import (
+	model "data-plane/telemetry/model"
 	"sort"
 
-	model "data-plane/pkg/report-info"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
