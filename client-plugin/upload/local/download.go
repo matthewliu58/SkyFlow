@@ -15,13 +15,13 @@ type Download struct {
 
 func NewDownload(
 	localDir string,
-	pre string, // 日志前缀（和之前保持一致）
-	logger *slog.Logger, // 日志实例（和之前保持一致）
+	pre string, // Log prefix (keep consistent with previous)
+	logger *slog.Logger, // Log instance (keep consistent with previous)
 ) *Download {
 	d := &Download{
 		localDir: localDir,
 	}
-	// 和其他初始化函数完全一致的日志打印逻辑
+	// Same log printing logic as other init functions
 	logger.Info("NewDownload", slog.String("pre", pre), slog.Any("Download", *d))
 	return d
 }
@@ -33,7 +33,7 @@ func (d *Download) DownloadFile(
 	start int64,
 	length int64,
 	bs string,
-	inMemory bool, // 新增参数放在最后，不影响原有调用
+	inMemory bool, // New parameter at the end, doesn't affect existing calls
 	pre string,
 	logger *slog.Logger,
 ) (io.ReadCloser, error) {
@@ -52,9 +52,9 @@ func (d *Download) DownloadFile(
 	default:
 	}
 
-	// 1. 拼接本地文件完整路径
+	// 1. Build full local file path
 	localFilePath := filepath.Join(localDir, filename)
-	localFilePath = filepath.Clean(localFilePath) // 标准化路径（处理多斜杠/相对路径）
+	localFilePath = filepath.Clean(localFilePath) // Normalize path (handle multiple slashes/relative paths)
 
 	logger.Info("Start range reading of local file",
 		slog.String("pre", pre),
@@ -62,7 +62,7 @@ func (d *Download) DownloadFile(
 		slog.Int64("start", start),
 		slog.Int64("length", length))
 
-	// 2. 基础校验：文件是否存在/是否为文件
+	// 2. Basic validation: file existence/is file
 	fileInfo, err := os.Stat(localFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -78,10 +78,10 @@ func (d *Download) DownloadFile(
 		return nil, fmt.Errorf("file %s is empty", localFilePath)
 	}
 
-	// 3. 处理读取范围（兼容完整读取/范围读取）
+	// 3. Handle read range (support full read/range read)
 	var actualStart, actualLength int64
 	if length <= 0 {
-		// 读取整个文件
+		// Read entire file
 		actualStart = 0
 		actualLength = fileTotalSize
 		logger.Info("Read entire file",
@@ -89,16 +89,16 @@ func (d *Download) DownloadFile(
 			slog.String("localFilePath", localFilePath),
 			slog.Int64("fileTotalSize", fileTotalSize))
 	} else {
-		// 范围读取：校验起始位置和长度合法性
+		// Range read: validate start position and length
 		if start < 0 {
-			return nil, fmt.Errorf("起始位置start不能为负: %d", start)
+			return nil, fmt.Errorf("start position cannot be negative: %d", start)
 		}
 		if start >= fileTotalSize {
-			return nil, fmt.Errorf("起始位置%d超出文件总大小%d", start, fileTotalSize)
+			return nil, fmt.Errorf("start position %d exceeds file size %d", start, fileTotalSize)
 		}
 
 		actualStart = start
-		// 修正长度：如果start+length超出文件大小，只读取到文件末尾
+		// Adjust length: if start+length exceeds file size, read only to end
 		if start+length > fileTotalSize {
 			actualLength = fileTotalSize - start
 			logger.Warn("Read length exceeds file size, automatically truncated",
@@ -115,22 +115,22 @@ func (d *Download) DownloadFile(
 			slog.Int64("actualLength", actualLength))
 	}
 
-	// 4. 打开文件（只读模式）
+	// 4. Open file (read-only mode)
 	file, err := os.Open(localFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 
-	// 5. 定位到读取起始位置
+	// 5. Seek to start position
 	if _, err := file.Seek(actualStart, io.SeekStart); err != nil {
-		file.Close() // 失败时关闭文件句柄
+		file.Close() // Close file handle on failure
 		return nil, fmt.Errorf("failed to seek to start position %d: %w", actualStart, err)
 	}
 
-	// 6. 封装Reader：限制读取长度 + 实现ReadCloser（统一资源释放）
-	// LimitReader限制读取长度，MultiReader确保读取完指定长度后返回EOF
+	// 6. Wrap Reader: limit read length + implement ReadCloser (unified resource release)
+	// LimitReader limits read length, MultiReader ensures EOF after specified length
 	limitedReader := io.LimitReader(file, actualLength)
-	// 封装为ReadCloser，Close时关闭底层文件句柄
+	// Wrap as ReadCloser, close underlying file handle on Close
 	readerWrapper := &localFileReaderWrapper{
 		reader: limitedReader,
 		file:   file,
@@ -148,26 +148,26 @@ func (d *Download) DownloadFile(
 	return readerWrapper, nil
 }
 
-// localFileReaderWrapper 封装本地文件Reader，实现ReadCloser接口
-// 核心：统一资源释放（Close时关闭底层文件句柄）
+// localFileReaderWrapper Wraps local file Reader, implements io.ReadCloser interface
+// Core: unified resource release (close underlying file handle on Close)
 type localFileReaderWrapper struct {
-	reader io.Reader    // 限制长度后的Reader
-	file   *os.File     // 底层文件句柄（用于Close）
-	pre    string       // 日志前缀
-	logger *slog.Logger // 日志对象
-	path   string       // 文件路径（用于日志）
-	closed bool         // 是否已关闭（避免重复关闭）
+	reader io.Reader    // Length-limited Reader
+	file   *os.File     // Underlying file handle (for Close)
+	pre    string       // Log prefix
+	logger *slog.Logger // Log object
+	path   string       // File path (for logging)
+	closed bool         // Whether closed (avoid double close)
 }
 
-// Read 实现io.Reader接口：流式读取指定范围的内容
+// Read Implements io.Reader interface: stream read specified range
 func (w *localFileReaderWrapper) Read(p []byte) (n int, err error) {
 	if w.closed {
-		return 0, fmt.Errorf("reader已关闭，无法读取")
+		return 0, fmt.Errorf("reader is closed, cannot read")
 	}
 	return w.reader.Read(p)
 }
 
-// Close 实现io.ReadCloser接口：释放文件句柄
+// Close Implements io.ReadCloser interface: release file handle
 func (w *localFileReaderWrapper) Close() error {
 	if w.closed {
 		return nil

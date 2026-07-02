@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"golang.org/x/time/rate"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -13,37 +12,39 @@ import (
 	"path/filepath"
 	"rigel-client/util"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type Upload struct {
-	serverURL    string // 接口地址（如 http://127.0.0.1:8080/api/v1/chunk/upload）
-	localBaseDir string // 分片文件的目录
+	serverURL    string // API address (e.g., http://127.0.0.1:8080/api/v1/chunk/upload)
+	localBaseDir string // Chunk file directory
 }
 
-// NewUpload 仿照统一风格初始化新版Upload结构体
+// NewUpload Initialize new Upload struct following unified style
 func NewUpload(
 	serverURL, localBaseDir string,
-	pre string, // 日志前缀（和之前保持一致）
-	logger *slog.Logger, // 日志实例（和之前保持一致）
+	pre string, // Log prefix (keep consistent with previous)
+	logger *slog.Logger, // Log instance (keep consistent with previous)
 ) *Upload {
 	u := &Upload{
 		serverURL:    serverURL,
 		localBaseDir: localBaseDir,
 	}
-	// 和其他初始化函数完全一致的日志打印逻辑
+	// Same log printing logic as other init functions
 	logger.Info("NewUpload", slog.String("pre", pre), slog.Any("Upload", *u))
 	return u
 }
 
-// UploadFileChunk 向 ChunkUploadHandler 接口上传单个分片文件（支持本地文件/内存流式双模式）
-// 核心改动：新增inMemory和dataReader参数，其余参数/逻辑完全保留
-// 参数说明（原参数顺序不变，最后新增2个参数）：
+// UploadFileChunk Upload single chunk file to ChunkUploadHandler API (supports local file/in-memory streaming dual mode)
+// Core change: add inMemory and dataReader params, keep rest unchanged
+// Parameter description (original param order unchanged, 2 new params added at the end):
 //
-//	req: 分片上传请求参数
-//	pre: 日志前缀
-//	logger: 日志对象
-//	inMemory: 新增！true=内存流式上传（从dataReader读取），false=本地文件上传（原逻辑）
-//	dataReader: 新增！inMemory=true时传入的数据源Reader（如SSH/GC SReader）
+//	req: Chunk upload request params
+//	pre: Log prefix
+//	logger: Log object
+//	inMemory: NEW! true=in-memory streaming upload (read from dataReader), false=local file upload (original logic)
+//	dataReader: NEW! Data source Reader when inMemory=true (e.g., SSH/GCS Reader)
 func (u *Upload) UploadFile(
 	ctx context.Context,
 	objectName string,
@@ -51,7 +52,7 @@ func (u *Upload) UploadFile(
 	hops string,
 	rateLimiter *rate.Limiter,
 	reader io.ReadCloser,
-	inMemory bool, // 新增：内存模式开关
+	inMemory bool, // New: in-memory mode switch
 	pre string,
 	logger *slog.Logger,
 ) error {
@@ -62,7 +63,7 @@ func (u *Upload) UploadFile(
 	chunkName := objectName     // 当前分片名称（对应 X-Chunk-Name）
 	dataReader := reader
 
-	// 仅在「上传开始前」检查ctx是否已取消（避免启动无效上传）
+	// Check ctx cancellation only before upload starts (avoid invalid upload)
 	select {
 	case <-ctx.Done():
 		err := fmt.Errorf("upload canceled before start: %w", ctx.Err())
@@ -71,102 +72,102 @@ func (u *Upload) UploadFile(
 	default:
 	}
 
-	// 2. 模式判断：inMemory=true → 内存流式上传；false → 本地文件上传（原逻辑）
+	// 2. Mode detection: inMemory=true -> in-memory streaming; false -> local file upload (original logic)
 	var fileReader io.Reader
 	var err error
 
 	if inMemory {
-		// 内存模式：直接使用传入的reader
+		// In-memory mode: use passed reader directly
 		if dataReader == nil {
-			return fmt.Errorf("内存模式下dataReader不能为空")
+			return fmt.Errorf("dataReader cannot be nil in in-memory mode")
 		}
 		fileReader = dataReader
-		logger.Info("使用内存流式上传分片", slog.String("pre", pre), slog.String("ChunkName", chunkName))
+		logger.Info("Upload chunk using in-memory streaming", slog.String("pre", pre), slog.String("ChunkName", chunkName))
 	} else {
-		// 本地文件模式：完全保留原逻辑
-		// 2.1 拼接分片文件完整路径（处理 Linux 路径分隔符）
+		// Local file mode: preserve original logic completely
+		// 2.1 Build full chunk file path (handle Linux path separator)
 		chunkFilePath := filepath.Join(u.localBaseDir, chunkName)
 		chunkFilePath = filepath.Clean(chunkFilePath)
 
-		// 2.2 校验 LocalBaseDir 目录（不存在则自动创建）
+		// 2.2 Validate LocalBaseDir (create if not exists)
 		if err := os.MkdirAll(u.localBaseDir, 0755); err != nil {
-			return fmt.Errorf("创建分片存储目录 %s 失败: %w", u.localBaseDir, err)
+			return fmt.Errorf("failed to create chunk storage directory %s: %w", u.localBaseDir, err)
 		}
 
-		// 2.3 校验分片文件是否存在且可读
+		// 2.3 Validate chunk file exists and is readable
 		fileInfo, err := os.Stat(chunkFilePath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Errorf("分片文件不存在: %s", chunkFilePath)
+				return fmt.Errorf("chunk file does not exist: %s", chunkFilePath)
 			}
-			return fmt.Errorf("获取分片文件信息失败: %w", err)
+			return fmt.Errorf("failed to get chunk file info: %w", err)
 		}
 		if fileInfo.IsDir() {
-			return fmt.Errorf("%s 是目录，不是分片文件", chunkFilePath)
+			return fmt.Errorf("%s is a directory, not a chunk file", chunkFilePath)
 		}
 		if fileInfo.Size() == 0 {
-			return fmt.Errorf("分片文件 %s 为空", chunkFilePath)
+			return fmt.Errorf("chunk file %s is empty", chunkFilePath)
 		}
 
-		// 2.4 打开本地分片文件（只读模式）
+		// 2.4 Open local chunk file (read-only mode)
 		file, err := os.Open(chunkFilePath)
 		if err != nil {
-			return fmt.Errorf("打开分片文件 %s 失败（请检查文件权限）: %w", chunkFilePath, err)
+			return fmt.Errorf("failed to open chunk file %s (check file permissions): %w", chunkFilePath, err)
 		}
-		defer file.Close() // 本地文件模式下延迟关闭
+		defer file.Close() // Close file in local mode
 		fileReader = file
 
-		logger.Info("使用本地文件上传分片", slog.String("pre", pre), slog.String("chunkFilePath", chunkFilePath))
+		logger.Info("Upload chunk using local file", slog.String("pre", pre), slog.String("chunkFilePath", chunkFilePath))
 	}
 
-	// 3. 构建 multipart/form-data 请求体（适配两种模式）
+	// 3. Build multipart/form-data request body (support both modes)
 	bodyBuf := &bytes.Buffer{}
 	bodyWriter := multipart.NewWriter(bodyBuf)
 
-	// 3.1 添加文件字段（字段名必须为 "file"，和服务端匹配）
+	// 3.1 Add file field (field name must be "file", match server)
 	fileWriter, err := bodyWriter.CreateFormFile("file", chunkName)
 	if err != nil {
-		return fmt.Errorf("创建文件表单字段失败: %w", err)
+		return fmt.Errorf("failed to create file form field: %w", err)
 	}
 
-	// 3.2 流式写入文件内容（两种模式共用此逻辑，避免加载大文件到内存）
+	// 3.2 Stream write file content (shared by both modes, avoid loading large files to memory)
 	if _, err := io.Copy(fileWriter, fileReader); err != nil {
-		return fmt.Errorf("写入文件内容失败: %w", err)
+		return fmt.Errorf("failed to write file content: %w", err)
 	}
 
-	// 3.3 关闭 multipart writer（生成结束边界）
+	// 3.3 Close multipart writer (generate end boundary)
 	if err := bodyWriter.Close(); err != nil {
-		return fmt.Errorf("关闭请求体 writer 失败: %w", err)
+		return fmt.Errorf("failed to close request body writer: %w", err)
 	}
 
-	// 4. 构建 HTTP POST 请求（完全保留原逻辑）
+	// 4. Build HTTP POST request (preserve original logic)
 	httpReq, err := http.NewRequest("POST", u.serverURL, bodyBuf)
 	if err != nil {
-		return fmt.Errorf("创建 HTTP 请求失败: %w", err)
+		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	// 5. 设置请求头（严格匹配服务端要求，完全保留原逻辑）
+	// 5. Set request headers (match server requirements, preserve original logic)
 	httpReq.Header.Set("Content-Type", bodyWriter.FormDataContentType())
 	httpReq.Header.Set(util.HeaderFileName, finalFileName)
 	httpReq.Header.Set(util.HeaderChunkName, chunkName)
 
-	// 6. 配置 HTTP 客户端（适配 Linux 长连接/超时，完全保留原逻辑）
+	// 6. Configure HTTP client (adapt to Linux keep-alive/timeout, preserve original logic)
 	client := &http.Client{Timeout: 1 * time.Minute}
 
-	// 7. 发送请求（完全保留原逻辑）
+	// 7. Send request (preserve original logic)
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("发送请求到 %s 失败: %w", u.serverURL, err)
+		return fmt.Errorf("failed to send request to %s: %w", u.serverURL, err)
 	}
 
-	// 8. 校验响应状态码（完全保留原逻辑，增强错误排查）
+	// 8. Validate response status code (preserve original logic, enhanced error troubleshooting)
 	if resp.StatusCode != http.StatusOK {
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			respBody = []byte("无法读取错误响应")
+			respBody = []byte("failed to read error response")
 		}
-		resp.Body.Close() // 必须关闭响应体
-		return fmt.Errorf("接口返回错误: 状态码 %d, 内容: %s", resp.StatusCode, string(respBody))
+		resp.Body.Close() // Must close response body
+		return fmt.Errorf("API returned error: status code %d, content: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil

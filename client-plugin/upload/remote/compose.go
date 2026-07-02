@@ -20,25 +20,25 @@ type Compose struct {
 func NewCompose(
 	serverURL string,
 	deleteChunks bool,
-	pre string, // 日志前缀（和之前保持一致）
-	logger *slog.Logger, // 日志实例（和之前保持一致）
+	pre string, // Log prefix (keep consistent with previous)
+	logger *slog.Logger, // Log instance (keep consistent with previous)
 ) *Compose {
 	c := &Compose{
 		serverURL:    serverURL,
 		deleteChunks: deleteChunks,
 	}
-	// 和其他初始化函数完全一致的日志打印逻辑
+	// Same log printing logic as other init functions
 	logger.Info("NewCompose", slog.String("pre", pre), slog.Any("Compose", *c))
 	return c
 }
 
-// ChunkMergeClient 分片合并客户端（直接返回原始响应内容）
-// 参数说明：
+// ChunkMergeClient Chunk merge client (returns raw response)
+// Parameter description:
 //
-//	serverURL: 服务端接口地址（如 "http://localhost:8080/api/v1/chunk/merge"）
-//	finalFileName: 合并后的最终文件名
-//	chunkNames: 分片名列表（按合并顺序）
-//	deleteChunks: 合并后是否删除分片
+//	serverURL: Server API address (e.g., "http://localhost:8080/api/v1/chunk/merge")
+//	finalFileName: Final merged file name
+//	chunkNames: Chunk names list (in merge order)
+//	deleteChunks: Whether to delete chunks after merge
 func (c *Compose) ComposeFile(ctx context.Context,
 	objectName string,
 	parts []string,
@@ -65,39 +65,39 @@ func (c *Compose) ComposeFile(ctx context.Context,
 	}
 	b, _ := json.Marshal(mergeReq)
 
-	// 2. 构造请求（分片合并接口不需要请求体，参数都在Header中）
+	// 2. Build request (chunk merge API doesn't need request body, params in Header)
 	req, err := http.NewRequest("POST", c.serverURL, bytes.NewReader(b))
 	if err != nil {
-		return fmt.Errorf("创建请求失败: %v", err)
+		return fmt.Errorf("failed to create request: %v", err)
 	}
 
-	// 3. 设置请求Header
-	// 设置最终文件名
+	// 3. Set request headers
+	// Set final file name
 	req.Header.Set("X-File-Name", finalFileName)
-	// 设置分片名列表（逗号分隔）
+	// Set chunk names list (comma separated)
 	//req.Header.Set(HeaderChunkNames, strings.Join(chunkNames, ","))
-	// 设置是否删除分片
+	// Set whether to delete chunks
 	//req.Header.Set(HeaderDeleteChunks, fmt.Sprintf("%t", deleteChunks))
-	// 设置Content-Type（虽然没有请求体，但建议设置）
+	// Set Content-Type (recommended even without body)
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 
-	// 4. 创建HTTP客户端并发送请求
+	// 4. Create HTTP client and send request
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("发送请求失败: %v", err)
+		return fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// 5. 读取响应内容（原始字符串）
+	// 5. Read response body (raw string)
 	respBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("读取响应失败: %v", err)
+		return fmt.Errorf("failed to read response: %v", err)
 	}
 
 	logger.Info("ChunkMergeClient", slog.String("pre", pre),
 		"respBody", string(respBody), "StatusCode", resp.StatusCode)
 
-	// 返回原始响应内容、HTTP状态码
+	// Return raw response content, HTTP status code
 	return nil
 }

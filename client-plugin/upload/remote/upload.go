@@ -3,16 +3,17 @@ package remote
 import (
 	"context"
 	"fmt"
-	"golang.org/x/time/rate"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
-	"rigel-client/limit-rate"
+	limit_rate "rigel-client/limit-rate"
 	"rigel-client/util"
 	"strings"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type Upload struct {
@@ -22,20 +23,20 @@ type Upload struct {
 
 func NewUpload(
 	localBaseDir, uploadURL string,
-	pre string, // 日志前缀（和之前保持一致）
-	logger *slog.Logger, // 日志实例（和之前保持一致）
+	pre string, // Log prefix (keep consistent with previous)
+	logger *slog.Logger, // Log instance (keep consistent with previous)
 ) *Upload {
 	u := &Upload{
 		localBaseDir: localBaseDir,
 		uploadURL:    uploadURL,
 	}
-	// 和其他初始化函数完全一致的日志打印逻辑
+	// Same log printing logic as other init functions
 	logger.Info("NewUpload", slog.String("pre", pre), slog.Any("Upload", *u))
 	return u
 }
 
-// UploadToGCSbyProxy 通过代理向GCS上传文件/分片（修复后）
-// 核心功能：支持内存流式上传（inMemory=true）和本地文件上传（inMemory=false），带限流和GCP鉴权
+// UploadToGCSbyProxy Upload file/chunk to GCS via proxy (fixed)
+// Core feature: supports in-memory streaming upload (inMemory=true) and local file upload (inMemory=false), with rate limiting and GCP auth
 func (u *Upload) UploadFile(
 	ctx context.Context,
 	objectName string,
@@ -50,7 +51,7 @@ func (u *Upload) UploadFile(
 
 	logger.Info("UploadFile start", slog.String("pre", pre), slog.Bool("inMemory", inMemory))
 
-	// ---------------------- 1. 基础参数校验（防空指针） ----------------------
+	// ---------------------- 1. Basic parameter validation (null check) ----------------------
 	if len(hops) == 0 {
 		err := fmt.Errorf("hops is empty")
 		logger.Error("Invalid hops", slog.String("pre", pre), slog.Any("err", err))
@@ -67,19 +68,19 @@ func (u *Upload) UploadFile(
 
 	var proxyReader io.ReadCloser = reader
 
-	// 定义资源关闭defer（统一释放所有Reader）
+	// Define resource cleanup defer (unified release of all Readers)
 	defer func() {
 		if proxyReader != nil && proxyReader != reader {
-			_ = proxyReader.Close() // 关闭本地文件Reader
+			_ = proxyReader.Close() // Close local file Reader
 		}
-		// 外部传入的reader由调用方负责关闭，此处不主动关闭（避免重复关闭）
+		// External reader closed by caller, don't close here (avoid double close)
 	}()
 
-	// ---------------------- 2. 选择上传源：内存流 / 本地文件 ----------------------
+	// ---------------------- 2. Select upload source: memory stream / local file ----------------------
 	if !inMemory {
-		// 模式1：inMemory=false → 从本地文件读取
+		// Mode 1: inMemory=false -> read from local file
 		localFilePath := filepath.Join(u.localBaseDir, objectName)
-		localFilePath = filepath.Clean(localFilePath) // 标准化路径（防多斜杠）
+		localFilePath = filepath.Clean(localFilePath) // Normalize path (prevent multiple slashes)
 
 		logger.Info("prepare to read local file",
 			slog.String("pre", pre),
@@ -98,7 +99,7 @@ func (u *Upload) UploadFile(
 			slog.String("pre", pre),
 			slog.String("localFilePath", localFilePath))
 	} else {
-		// 模式2：inMemory=true → 使用外部传入的内存Reader
+		// Mode 2: inMemory=true -> use externally provided memory Reader
 		if proxyReader == nil {
 			err := fmt.Errorf("inMemory=true but reader is nil")
 			logger.Error("invalid reader", slog.String("pre", pre), slog.Any("err", err))
@@ -107,11 +108,11 @@ func (u *Upload) UploadFile(
 		logger.Info("use in-memory reader for upload", slog.String("pre", pre))
 	}
 
-	// ---------------------- 3. 限流包装Reader ----------------------
+	// ---------------------- 3. Rate limit wrap Reader ----------------------
 	rateLimitedBody := limit_rate.NewRateLimitedReader(ctx, proxyReader, rateLimiter)
 	logger.Info("rate limiter applied to reader", slog.String("pre", pre))
 
-	// ---------------------- 4. 解析hops并构造URL ----------------------
+	// ---------------------- 4. Parse hops and construct URL ----------------------
 	hopList := strings.Split(hops, ",")
 	if len(hopList) == 0 {
 		err := fmt.Errorf("invalid X-Hops: %s (split empty)", hops)
@@ -126,7 +127,7 @@ func (u *Upload) UploadFile(
 		slog.String("url", url),
 		slog.String("firstHop", firstHop))
 
-	// ---------------------- 6. 构造并发送HTTP请求 ----------------------
+	// ---------------------- 6. Build and send HTTP request ----------------------
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, rateLimitedBody)
 	if err != nil {
 		logger.Error("create HTTP request failed",
@@ -160,9 +161,9 @@ func (u *Upload) UploadFile(
 			slog.Any("err", err))
 		return fmt.Errorf("http do: %w", err)
 	}
-	defer resp.Body.Close() // 确保响应体关闭
+	defer resp.Body.Close() // Ensure response body closes
 
-	// ---------------------- 7. 校验响应状态 ----------------------
+	// ---------------------- 7. Validate response status ----------------------
 	if resp.StatusCode >= 300 {
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {

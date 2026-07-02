@@ -3,7 +3,6 @@ package remote
 import (
 	"context"
 	"fmt"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"log/slog"
 	"os"
@@ -11,20 +10,22 @@ import (
 	"rigel-client/util"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type Download struct {
-	user      string // 用户名
-	hostPort  string // 主机IP:端口（如192.168.1.20:22）
-	password  string // 密码（或用密钥认证）
+	user      string // Username
+	hostPort  string // Host IP:port (e.g., 192.168.1.20:22)
+	password  string // Password (or use key authentication)
 	remoteDir string
 	localDir  string
 }
 
 func NewDownload(
 	user, hostPort, password, remoteDir, localDir string,
-	pre string, // 日志前缀（和之前保持一致）
-	logger *slog.Logger, // 日志实例（和之前保持一致）
+	pre string, // Log prefix (keep consistent with previous)
+	logger *slog.Logger, // Log instance (keep consistent with previous)
 ) *Download {
 	d := &Download{
 		user:      user,
@@ -33,7 +34,7 @@ func NewDownload(
 		remoteDir: remoteDir,
 		localDir:  localDir,
 	}
-	// 和其他初始化函数完全一致的日志打印逻辑
+	// Same log printing logic as other init functions
 	logger.Info("NewDownload", slog.String("pre", pre), slog.Any("Download", *d))
 	return d
 }
@@ -45,7 +46,7 @@ func (d *Download) DownloadFile(
 	start int64,
 	length int64,
 	bs string,
-	inMemory bool, // 新增参数放在最后，不影响原有调用
+	inMemory bool, // New parameter at the end, doesn't affect existing calls
 	pre string,
 	logger *slog.Logger,
 ) (io.ReadCloser, error) {
@@ -58,104 +59,104 @@ func (d *Download) DownloadFile(
 	default:
 	}
 
-	// 1. 拼接远端文件完整路径
+	// 1. Build full remote file path
 	remoteFile := filepath.Join(d.remoteDir, filename)
 
-	// 2. 处理length ≤ 0的情况（读取全部文件）
+	// 2. Handle length <= 0 (read entire file)
 	var actualStart, actualLength int64
 	if length <= 0 {
-		// 获取远端文件总大小
+		// Get remote file total size
 
 		gs := NewGetSize(d.user, d.hostPort, d.password, d.remoteDir, pre, logger)
 		fileSize, err := gs.GetFileSize(ctx, filename, pre, logger)
 		if err != nil {
-			return nil, fmt.Errorf("获取文件大小失败：%w", err)
+			return nil, fmt.Errorf("failed to get file size: %w", err)
 		}
-		actualStart = 0         // 从文件开头读取
-		actualLength = fileSize // 读取完整文件大小
-		logger.Info("读取整个文件",
+		actualStart = 0         // Read from beginning
+		actualLength = fileSize // Read full file size
+		logger.Info("Read entire file",
 			slog.String("pre", pre),
-			slog.String("远端文件", remoteFile),
-			slog.Int64("文件总大小(字节)", actualLength))
+			slog.String("remoteFile", remoteFile),
+			slog.Int64("fileTotalSize(bytes)", actualLength))
 	} else {
-		// 验证start合法性（length>0时start不能为负）
+		// Validate start (start cannot be negative when length > 0)
 		if start < 0 {
-			return nil, fmt.Errorf("start不能小于0（length>0时）")
+			return nil, fmt.Errorf("start cannot be negative (when length > 0)")
 		}
 		actualStart = start
 		actualLength = length
-		logger.Info("读取指定范围文件",
+		logger.Info("Read specified range",
 			slog.String("pre", pre),
-			slog.String("远端文件", remoteFile),
-			slog.Int64("起始位置(字节)", actualStart),
-			slog.Int64("读取长度(字节)", actualLength))
+			slog.String("remoteFile", remoteFile),
+			slog.Int64("startPosition(bytes)", actualStart),
+			slog.Int64("readLength(bytes)", actualLength))
 	}
 
-	// 3. 自动选择最优块大小（如果bs为空）
+	// 3. Auto select optimal block size (if bs is empty)
 	if strings.TrimSpace(bs) == "" {
 		bs = util.AutoSelectBs(actualLength)
-		//logger.Info("自动选择块大小",
+		//logger.Info("Auto select block size",
 		//	slog.String("pre", pre),
-		//	slog.String("块大小", bs))
+		//	slog.String("blockSize", bs))
 	}
 
-	// 4. 解析块大小为字节数
+	// 4. Parse block size to bytes
 	bsBytes, err := util.ParseBsToBytes(bs)
 	if err != nil {
-		return nil, fmt.Errorf("解析块大小失败：%w", err)
+		return nil, fmt.Errorf("failed to parse block size: %w", err)
 	}
 
-	// 5. 计算dd命令参数（skip=跳过的块数，count=读取的块数）
-	skip := actualStart / bsBytes                   // 定位到起始位置需要跳过的块数
-	count := (actualLength + bsBytes - 1) / bsBytes // 需要读取的块数（向上取整）
+	// 5. Calculate dd command params (skip=blocks to skip, count=blocks to read)
+	skip := actualStart / bsBytes                   // Blocks to skip for start position
+	count := (actualLength + bsBytes - 1) / bsBytes // Blocks to read (rounded up)
 	ddCmd := fmt.Sprintf("dd if=%s bs=%s skip=%d count=%d", remoteFile, bs, skip, count)
 
-	// 6. 初始化SSH客户端配置
+	// 6. Initialize SSH client config
 	sshConfig := &ssh.ClientConfig{
 		User:            d.user,
 		Auth:            []ssh.AuthMethod{ssh.Password(d.password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // 生产环境建议替换为合法的密钥验证
-		Timeout:         1 * time.Minute,             // 增大超时适配大文件读取
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Recommend secure key verification in production
+		Timeout:         1 * time.Minute,             // Extended timeout for large file reads
 	}
 
-	// 7. 建立SSH连接
+	// 7. Establish SSH connection
 	client, err := ssh.Dial("tcp", d.hostPort, sshConfig)
 	if err != nil {
-		return nil, fmt.Errorf("SSH连接失败：%w", err)
+		return nil, fmt.Errorf("SSH connection failed: %w", err)
 	}
 
-	// 8. 创建SSH会话
+	// 8. Create SSH session
 	session, err := client.NewSession()
 	if err != nil {
 		client.Close()
-		return nil, fmt.Errorf("创建SSH会话失败：%w", err)
+		return nil, fmt.Errorf("failed to create SSH session: %w", err)
 	}
 
-	// 9. 获取dd命令的标准输出管道
+	// 9. Get stdout pipe for dd command
 	stdout, err := session.StdoutPipe()
 	if err != nil {
 		session.Close()
 		client.Close()
-		return nil, fmt.Errorf("获取stdout管道失败：%w", err)
+		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
 
-	// 10. 启动dd命令
-	logger.Info(fmt.Sprintf("执行dd命令（%s模式）", map[bool]string{true: "内存流式", false: "本地落盘"}[inMemory]),
+	// 10. Start dd command
+	logger.Info(fmt.Sprintf("Execute dd command (%s mode)", map[bool]string{true: "in-memory stream", false: "local disk"}[inMemory]),
 		slog.String("pre", pre),
-		slog.String("命令", ddCmd))
+		slog.String("command", ddCmd))
 	if err := session.Start(ddCmd); err != nil {
 		session.Close()
 		client.Close()
-		return nil, fmt.Errorf("启动dd命令失败：%w，命令：%s", err, ddCmd)
+		return nil, fmt.Errorf("failed to start dd command: %w, command: %s", err, ddCmd)
 	}
 
-	// ==================== 模式1：inMemory=true → 内存流式（不落盘） ====================
+	// ==================== Mode 1: inMemory=true -> In-memory stream (no disk write) ====================
 	if inMemory {
-		logger.Info("读取远端文件（内存流式模式，不落盘）",
+		logger.Info("Read remote file (in-memory streaming mode, no disk write)",
 			slog.String("pre", pre),
-			slog.String("远端文件", remoteFile))
+			slog.String("remoteFile", remoteFile))
 
-		// 封装Reader和SSH资源（调用方Close释放）
+		// Wrap Reader and SSH resources (caller Close releases)
 		readerWrapper := &sshReaderWrapper{
 			reader:       stdout,
 			session:      session,
@@ -169,86 +170,86 @@ func (d *Download) DownloadFile(
 		return readerWrapper, nil
 	}
 
-	// ==================== 模式2：inMemory=false → 本地落盘（完全兼容原逻辑） ====================
-	// 11. 确保本地目录存在
+	// ==================== Mode 2: inMemory=false -> Local disk write (fully compatible with original logic) ====================
+	// 11. Ensure local directory exists
 	if err := os.MkdirAll(d.localDir, 0755); err != nil {
 		session.Close()
 		client.Close()
-		return nil, fmt.Errorf("创建本地目录失败：%w", err)
+		return nil, fmt.Errorf("failed to create local directory: %w", err)
 	}
 
-	// 12. 创建本地文件（覆盖已有文件）
+	// 12. Create local file (overwrite existing)
 	localFilePath := filepath.Join(d.localDir, newFilename)
 	localFd, err := os.Create(localFilePath)
 	if err != nil {
 		session.Close()
 		client.Close()
-		return nil, fmt.Errorf("创建本地文件失败：%w", err)
+		return nil, fmt.Errorf("failed to create local file: %w", err)
 	}
 	defer localFd.Close()
 
-	// 13. 执行dd命令并将输出写入本地文件
-	logger.Info("将dd输出写入本地文件",
+	// 13. Execute dd command and write output to local file
+	logger.Info("Write dd output to local file",
 		slog.String("pre", pre),
-		slog.String("输出文件", localFilePath))
+		slog.String("outputFile", localFilePath))
 
-	// 一次性将dd输出拷贝到本地文件（原逻辑）
+	// Copy dd output to local file at once (original logic)
 	_, err = io.Copy(localFd, stdout)
 	if err != nil {
 		session.Close()
 		client.Close()
-		return nil, fmt.Errorf("写入本地文件失败：%w", err)
+		return nil, fmt.Errorf("failed to write to local file: %w", err)
 	}
 
-	// 等待dd命令执行完成
+	// Wait for dd command to complete
 	if err := session.Wait(); err != nil {
-		logger.Warn("dd命令执行完成但返回非0状态",
+		logger.Warn("dd command completed with non-zero exit status",
 			slog.String("pre", pre),
-			slog.String("错误", err.Error()))
+			slog.String("error", err.Error()))
 	}
 
-	// 关闭SSH资源（落盘模式下资源已用完）
+	// Close SSH resources (resources consumed in disk mode)
 	session.Close()
 	client.Close()
 
-	// 验证本地文件大小（原逻辑）
+	// Verify local file size (original logic)
 	fileInfo, err := os.Stat(localFilePath)
 	if err != nil {
-		logger.Warn("无法获取本地文件信息",
+		logger.Warn("Failed to get local file info",
 			slog.String("pre", pre),
-			slog.String("文件", localFilePath),
-			slog.String("错误", err.Error()))
+			slog.String("file", localFilePath),
+			slog.String("error", err.Error()))
 	} else {
-		logger.Info("文件读取完成",
+		logger.Info("File read completed",
 			slog.String("pre", pre),
-			slog.String("本地文件", localFilePath),
-			slog.Int64("文件大小(字节)", fileInfo.Size()),
-			slog.String("预期大小(字节)", fmt.Sprintf("%d", actualLength)))
+			slog.String("localFile", localFilePath),
+			slog.Int64("fileSize(bytes)", fileInfo.Size()),
+			slog.String("expectedSize(bytes)", fmt.Sprintf("%d", actualLength)))
 	}
 
-	// 打开本地文件返回Reader（方便调用方后续读取）
+	// Open local file and return Reader (convenient for caller)
 	localFileReader, err := os.Open(localFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("打开本地文件失败：%w", err)
+		return nil, fmt.Errorf("failed to open local file: %w", err)
 	}
 
-	// 兼容原返回值：返回本地文件名（newFilename）和路径
+	// Compatible with original return: return local file name (newFilename) and path
 	return localFileReader, nil
 }
 
-// sshReaderWrapper 封装stdout Reader + SSH资源清理逻辑（内存模式用）
+// sshReaderWrapper Wraps stdout Reader + SSH resource cleanup logic (for memory mode)
 type sshReaderWrapper struct {
-	reader       io.Reader    // dd命令的stdout管道（无Close）
-	session      *ssh.Session // SSH会话
-	client       *ssh.Client  // SSH客户端
-	pre          string       // 日志前缀
-	logger       *slog.Logger // 日志对象
-	ddCmd        string       // dd命令
-	actualLength int64        // 预期读取长度
-	readDone     bool         // 是否已读取完成
+	reader       io.Reader    // dd command stdout pipe (no Close)
+	session      *ssh.Session // SSH session
+	client       *ssh.Client  // SSH client
+	pre          string       // Log prefix
+	logger       *slog.Logger // Log object
+	ddCmd        string       // dd command
+	actualLength int64        // Expected read length
+	readDone     bool         // Whether read completed
 }
 
-// Read 实现io.Reader接口
+// Read Implements io.Reader interface
 func (w *sshReaderWrapper) Read(p []byte) (n int, err error) {
 	n, err = w.reader.Read(p)
 	if err == io.EOF {
@@ -261,29 +262,29 @@ func (w *sshReaderWrapper) Read(p []byte) (n int, err error) {
 func (w *sshReaderWrapper) Close() error {
 	var errStr []string
 
-	// 等待dd命令执行完成
+	// Wait for dd command to complete
 	if !w.readDone {
 		if err := w.session.Wait(); err != nil {
-			w.logger.Warn("dd命令执行完成但返回非0状态",
+			w.logger.Warn("dd command completed with non-zero exit status",
 				slog.String("pre", w.pre),
-				slog.String("命令", w.ddCmd),
-				slog.String("错误", err.Error()))
+				slog.String("command", w.ddCmd),
+				slog.String("error", err.Error()))
 		}
 	}
 
-	// 关闭SSH会话
+	// Close SSH session
 	if err := w.session.Close(); err != nil {
-		errStr = append(errStr, fmt.Sprintf("SSH会话关闭失败：%v", err))
+		errStr = append(errStr, fmt.Sprintf("failed to close SSH session: %v", err))
 	}
 
-	// 关闭SSH客户端
+	// Close SSH client
 	if err := w.client.Close(); err != nil {
-		errStr = append(errStr, fmt.Sprintf("SSH客户端关闭失败：%v", err))
+		errStr = append(errStr, fmt.Sprintf("failed to close SSH client: %v", err))
 	}
 
-	w.logger.Info("SSH流式读取资源已释放",
+	w.logger.Info("SSH streaming read resources released",
 		slog.String("pre", w.pre),
-		slog.String("dd命令", w.ddCmd))
+		slog.String("ddCommand", w.ddCmd))
 
 	if len(errStr) > 0 {
 		return fmt.Errorf(strings.Join(errStr, "; "))
