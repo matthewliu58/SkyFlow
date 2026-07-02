@@ -2,29 +2,30 @@ package health
 
 import (
 	"data-proxy/util"
-	"github.com/gin-gonic/gin"
 	"log/slog"
 	"net/http"
 	"sync"
+
+	"github.com/gin-gonic/gin"
 )
 
 var (
-	// 锁和状态变量
+	// Lock and status variables
 	statusLock sync.Mutex
-	status     string = "on" // 默认状态为 "on"
+	status     string = "on" // Default status is "on"
 )
 
-// HealthStateChange 修改健康状态开关 /healthStateChange?set=on/off
+// HealthStateChange modify health status switch /healthStateChange?set=on/off
 func HealthStateChange(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		pre := util.GenerateRandomLetters(5)
 		logger.Info("healthStateChange", slog.String("pre", pre))
 
-		// 获取参数
+		// Get parameter
 		set := c.DefaultQuery("set", "on")
 		logger.Info("get switch val", slog.String("pre", pre), slog.String("set", set))
 
-		// 加锁修改状态
+		// Lock and modify status
 		statusLock.Lock()
 		defer statusLock.Unlock()
 
@@ -38,7 +39,7 @@ func HealthStateChange(logger *slog.Logger) gin.HandlerFunc {
 	}
 }
 
-// Health 健康检查 /health
+// Health health check /health
 func Health(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		pre := util.GenerateRandomLetters(5)

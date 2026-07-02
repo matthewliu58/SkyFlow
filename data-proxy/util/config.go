@@ -2,47 +2,48 @@ package util
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"log/slog"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 var (
 	Config_ *Config
 )
 
-// Config 一级结构体，对应yaml平级配置
+// Config top-level struct, corresponding to yaml top-level configuration
 type Config struct {
 	Port string `yaml:"port"`
 	//Mem  int64  `yaml:"mem"`
 }
 
-// ReadYamlConfig 读取同层级的config.yaml配置
+// ReadYamlConfig read config.yaml from the same directory
 func ReadYamlConfig(logger *slog.Logger) (*Config, error) {
-	// 1. 获取当前可执行文件所在目录（确保和config.yaml同层级）
+	// 1. Get current executable directory (ensure it's at the same level as config.yaml)
 	exePath, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("获取程序路径失败: %w", err)
+		return nil, fmt.Errorf("failed to get executable path: %w", err)
 	}
-	exeDir := filepath.Dir(exePath)                    // 程序所在目录
-	configPath := filepath.Join(exeDir, "config.yaml") // 拼接同层级的config.yaml路径
+	exeDir := filepath.Dir(exePath)                    // Executable directory
+	configPath := filepath.Join(exeDir, "config.yaml") // Join path to config.yaml at the same level
 
-	// 2. 校验配置文件是否存在
+	// 2. Check if config file exists
 	if _, err = os.Stat(configPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("配置文件不存在: %s（请确保config.yaml和程序同目录）", configPath)
+		return nil, fmt.Errorf("config file does not exist: %s (ensure config.yaml is in the same directory as the executable)", configPath)
 	}
 
-	// 3. 读取配置文件内容
+	// 3. Read config file content
 	content, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %w", err)
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	// 4. 解析yaml到结构体
+	// 4. Parse yaml into struct
 	var config Config
 	if err = yaml.Unmarshal(content, &config); err != nil {
-		return nil, fmt.Errorf("解析yaml失败: %w", err)
+		return nil, fmt.Errorf("failed to parse yaml: %w", err)
 	}
 
 	return &config, nil

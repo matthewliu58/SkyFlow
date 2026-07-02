@@ -134,7 +134,7 @@ func RenderEnvoyYamlConfig(cfg *EnvoyGlobalConfig, outputPath string) error {
 	defer file.Close()
 
 	// 渲染模板并写入文件
-	if err := tpl.Execute(file, cfg); err != nil {
+	if err = tpl.Execute(file, cfg); err != nil {
 		return err
 	}
 

@@ -6,7 +6,6 @@ import (
 	"data-proxy/health"
 	"data-proxy/queue"
 	"data-proxy/util"
-	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"os"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"log/slog"
 )
@@ -30,32 +31,32 @@ const (
 	ServerErrorCode = 503
 )
 
-// 自定义Handler：修复slog.Context为context.Context，兼容所有Go 1.21+版本
+// Custom Handler: Fix slog.Context to context.Context for Go 1.21+ compatibility
 type SourceHandler struct {
 	handler slog.Handler
 }
 
-// Handle 核心修复：把slog.Context改为context.Context
+// Handle: Core fix - change slog.Context to context.Context
 func (h *SourceHandler) Handle(ctx context.Context, r slog.Record) error {
-	// 采集调用日志的位置（跳过当前Handler的栈帧，取真实业务代码的位置）
+	// Collect log call location (skip current handler's stack frame, get real business code location)
 	fs := runtime.CallersFrames([]uintptr{r.PC})
 	frame, _ := fs.Next()
 
-	// 只保留文件名（去掉全路径）
+	// Keep only filename (remove full path)
 	fileName := filepath.Base(frame.File)
 
-	// 向日志记录中添加源位置字段
+	// Add source location fields to log record
 	r.AddAttrs(
-		slog.String("file", fileName),          // 文件名
-		slog.Int("line", frame.Line),           // 行号
-		slog.String("func", frame.Func.Name()), // 函数名（可选）
+		slog.String("file", fileName),          // File name
+		slog.Int("line", frame.Line),           // Line number
+		slog.String("func", frame.Func.Name()), // Function name (optional)
 	)
 
-	// 交给底层TextHandler输出
+	// Pass to underlying TextHandler for output
 	return h.handler.Handle(ctx, r)
 }
 
-// 以下是slog.Handler接口的默认实现（全部修正为context.Context）
+// Below are default implementations of slog.Handler interface (all fixed to context.Context)
 func (h *SourceHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.handler.Enabled(ctx, level)
 }
@@ -68,7 +69,7 @@ func (h *SourceHandler) WithGroup(name string) slog.Handler {
 	return &SourceHandler{handler: h.handler.WithGroup(name)}
 }
 
-// 统计 reader：包在 io.Copy 的数据路径上
+// countingReader: wraps around io.Copy data path for statistics
 type countingReader struct {
 	r io.Reader
 }
@@ -77,7 +78,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-// 拆分 x-hops 字符串
+// Split x-hops string
 func splitHops(hopsStr string) []string {
 	if hopsStr == "" {
 		return []string{}
@@ -89,7 +90,7 @@ func splitHops(hopsStr string) []string {
 	return parts
 }
 
-// ==================== client池 ====================
+// ==================== client pool ====================
 var (
 	clientMap = make(map[string]*http.Client)
 	clientMu  = &sync.RWMutex{}
@@ -123,7 +124,7 @@ func getClient(target string, scheme string) *http.Client {
 	return c
 }
 
-// handler 返回 http.HandlerFunc
+// handler returns http.HandlerFunc
 func handler(logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -176,7 +177,7 @@ func handler(logger *slog.Logger) http.HandlerFunc {
 
 		scheme := "http"
 		method := r.Method
-		//最后一跳的逻辑
+		// Last hop logic
 		if newIndex == len(hops) {
 			sourceType := r.Header.Get(HeaderDestType)
 			if sourceType != RemoteDisk {
@@ -219,7 +220,7 @@ func handler(logger *slog.Logger) http.HandlerFunc {
 		}
 		w.WriteHeader(resp.StatusCode)
 
-		//只在真正转发数据时计数
+		// Count only during actual data forwarding
 		atomic.AddInt64(&queue.ActiveTransfers, 1)
 		_, err = io.Copy(w, &countingReader{r: resp.Body})
 		atomic.AddInt64(&queue.ActiveTransfers, -1)
@@ -244,16 +245,16 @@ func main() {
 	}
 	defer logFile.Close()
 
-	// 2. 配置基础TextHandler（保留原有Level等配置）
+	// 2. Configure base TextHandler (preserve existing Level configuration)
 	baseHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
-		Level:     slog.LevelInfo, // 日志级别
-		AddSource: true,           // 必须开启！否则无法获取文件名/行号
+		Level:     slog.LevelInfo, // Log level
+		AddSource: true,           // Must be enabled! Otherwise cannot get filename/line number
 	})
 
-	// 3. 包装成自定义SourceHandler（添加文件名、行号、函数名）
+	// 3. Wrap with custom SourceHandler (add filename, line number, function name)
 	logger := slog.New(&SourceHandler{handler: baseHandler})
 
-	// 4. 设置为全局logger（可选，整个项目都能生效）
+	// 4. Set as global logger (optional, affects entire project)
 	slog.SetDefault(logger)
 
 	pre := "init"

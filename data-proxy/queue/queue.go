@@ -2,12 +2,13 @@ package queue
 
 import (
 	"data-proxy/util"
-	"github.com/gin-gonic/gin"
-	"github.com/shirou/gopsutil/v3/process"
 	"log/slog"
 	"net/http"
 	"os"
 	"sync/atomic"
+
+	"github.com/gin-gonic/gin"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 const (
@@ -21,11 +22,11 @@ var (
 )
 
 type ProxyStatus struct {
-	ActiveConnections int64   `json:"active_connections"` // 当前活跃连接数
-	TotalMem          int64   `json:"total_mem"`          // 机器总内存（字节）
-	ProcessMem        int64   `json:"process_mem"`        // 当前进程使用内存（字节）
-	AvgCachePerConn   float64 `json:"avg_cache_per_conn"` // 平均每连接缓存大小（字节）
-	CacheUsageRatio   float64 `json:"cache_usage_ratio"`  // 缓存使用比例 [0,1]
+	ActiveConnections int64   `json:"active_connections"` // Current active connection count
+	TotalMem          int64   `json:"total_mem"`          // Total machine memory (bytes)
+	ProcessMem        int64   `json:"process_mem"`        // Current process memory usage (bytes)
+	AvgCachePerConn   float64 `json:"avg_cache_per_conn"` // Average cache size per connection (bytes)
+	CacheUsageRatio   float64 `json:"cache_usage_ratio"`  // Cache usage ratio [0,1]
 }
 
 func CheckCongestion(allBufferSize int, pre string, logger *slog.Logger) ProxyStatus {
@@ -37,7 +38,7 @@ func CheckCongestion(allBufferSize int, pre string, logger *slog.Logger) ProxySt
 	proxyMem := int64(memInfo.RSS)
 	s.ProcessMem = proxyMem
 
-	perConnCache := allBufferSize * 1024 // 每连接 128 KB
+	perConnCache := allBufferSize * 1024 // 128 KB per connection
 	active := atomic.LoadInt64(&ActiveTransfers)
 	if active <= 0 {
 		return s
@@ -53,14 +54,14 @@ func CheckCongestion(allBufferSize int, pre string, logger *slog.Logger) ProxySt
 
 	if s.CacheUsageRatio > WarningLevelforBuffer {
 		logger.Warn("Potential congestion: average per-connection buffer near 128KB",
-			slog.String("pre", pre), slog.Int64("WarningLevelforBuffer", WarningLevelforBuffer))
+			slog.String("pre", pre), slog.Float64("warning_level", WarningLevelforBuffer))
 	}
 
 	logger.Info("Proxy status", slog.String("pre", pre), slog.Any("ProxyStatus", s))
 	return s
 }
 
-// GetCongestionInfo 获取拥堵状态 /getCongestionInfo
+// GetCongestionInfo get congestion status /getCongestionInfo
 func GetCongestionInfo(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		pre := util.GenerateRandomLetters(5)
