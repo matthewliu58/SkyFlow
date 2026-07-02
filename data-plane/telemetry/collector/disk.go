@@ -2,14 +2,15 @@ package collector
 
 import (
 	model "data-plane/telemetry/model"
+
 	"github.com/shirou/gopsutil/v3/disk"
 )
 
-// collectDisk 采集根分区/系统盘信息
+// collectDisk collects root partition/system disk info
 func collectDisk() (model.DiskInfo, error) {
-	// 默认采集根分区（Linux: /, Windows: C:\）
+	// Default root partition (Linux: /, Windows: C:\)
 	path := "/"
-	// Windows适配
+	// Windows adaptation
 	// if runtime.GOOS == "windows" {
 	// 	path = "C:\\"
 	// }

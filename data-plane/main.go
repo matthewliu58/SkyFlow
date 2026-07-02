@@ -6,7 +6,6 @@ import (
 	"data-plane/telemetry"
 	"data-plane/util"
 	"encoding/json"
-	"github.com/gin-gonic/gin"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,34 +13,36 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
-// 自定义Handler：修复slog.Context为context.Context，兼容所有Go 1.21+版本
+// Custom Handler: Fix slog.Context to context.Context for Go 1.21+ compatibility
 type SourceHandler struct {
 	handler slog.Handler
 }
 
-// Handle 核心修复：把slog.Context改为context.Context
+// Handle: Core fix - change slog.Context to context.Context
 func (h *SourceHandler) Handle(ctx context.Context, r slog.Record) error {
-	// 采集调用日志的位置（跳过当前Handler的栈帧，取真实业务代码的位置）
+	// Collect log call location (skip current handler's stack frame, get real business code location)
 	fs := runtime.CallersFrames([]uintptr{r.PC})
 	frame, _ := fs.Next()
 
-	// 只保留文件名（去掉全路径）
+	// Keep only filename (remove full path)
 	fileName := filepath.Base(frame.File)
 
-	// 向日志记录中添加源位置字段
+	// Add source location fields to log record
 	r.AddAttrs(
-		slog.String("file", fileName),          // 文件名
-		slog.Int("line", frame.Line),           // 行号
-		slog.String("func", frame.Func.Name()), // 函数名（可选）
+		slog.String("file", fileName),          // File name
+		slog.Int("line", frame.Line),           // Line number
+		slog.String("func", frame.Func.Name()), // Function name (optional)
 	)
 
-	// 交给底层TextHandler输出
+	// Pass to underlying TextHandler for output
 	return h.handler.Handle(ctx, r)
 }
 
-// 以下是slog.Handler接口的默认实现（全部修正为context.Context）
+// Below are default implementations of slog.Handler interface (all fixed to context.Context)
 func (h *SourceHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.handler.Enabled(ctx, level)
 }
@@ -55,30 +56,30 @@ func (h *SourceHandler) WithGroup(name string) slog.Handler {
 }
 
 var (
-	// 锁和状态变量
+	// Lock and status variables
 	statusLock sync.Mutex
-	status     string = "on" // 默认状态为 "on"
+	status     string = "on" // Default status is "on"
 )
 
 func main() {
 
-	// 创建 log 目录（与 pkg 同级）
+	// Create log directory (same level as pkg)
 	logDir := filepath.Join(".", "log")
 	if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
-		panic("无法创建日志目录: " + err.Error())
+		panic("Failed to create log directory: " + err.Error())
 	}
 	logFilePath := filepath.Join(logDir, "app.log")
 	//logFilePath1 := filepath.Join(logDir, "envoy.log")
 	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		panic("无法打开日志文件: " + err.Error())
+		panic("Failed to open log file: " + err.Error())
 	}
 	//logFile1, err := os.OpenFile(logFilePath1, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	//if err != nil {
 	//	panic("无法打开日志文件: " + err.Error())
 	//}
 
-	// 初始化日志，输出到 log/app.log
+	// Initialize logger, output to log/app.log
 	//logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{
 	//	Level: slog.LevelInfo,
 	//}))
@@ -86,16 +87,16 @@ func main() {
 	//	Level: slog.LevelInfo,
 	//}))
 
-	// 2. 配置基础TextHandler（保留原有Level等配置）
+	// 2. Configure base TextHandler (preserve existing Level configuration)
 	baseHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
-		Level:     slog.LevelInfo, // 日志级别
-		AddSource: true,           // 必须开启！否则无法获取文件名/行号
+		Level:     slog.LevelInfo, // Log level
+		AddSource: true,           // Must be enabled! Otherwise cannot get filename/line number
 	})
 
-	// 3. 包装成自定义SourceHandler（添加文件名、行号、函数名）
+	// 3. Wrap with custom SourceHandler (add filename, line number, function name)
 	logger := slog.New(&SourceHandler{handler: baseHandler})
 
-	// 4. 设置为全局logger（可选，整个项目都能生效）
+	// 4. Set as global logger (optional, affects entire project)
 	slog.SetDefault(logger)
 
 	logPre := "init"
@@ -106,14 +107,14 @@ func main() {
 		return
 	} else {
 		b, _ := json.Marshal(util.Config_)
-		logger.Info("读取配置文件成功", slog.String("pre", logPre),
+		logger.Info("Config file read successfully", slog.String("pre", logPre),
 			slog.String("config", string(b)))
 	}
 	//envoy_manager.EnvoyPath = util.Config_.EnvoyPath
 	//envoy_manager.DefaultConfig = util.Config_.DefaultConfig
 	//envoy_manager.EnvoyLog = util.Config_.EnvoyLog
 
-	// 2. 初始化Gin路由
+	// 2. Initialize Gin router
 	router := gin.Default()
 
 	router.GET("/healthStateChange", func(c *gin.Context) {
@@ -122,21 +123,21 @@ func main() {
 
 		logger.Info("healthStateChange", slog.String("pre", pre))
 
-		// 获取查询参数 "set"
-		set := c.DefaultQuery("set", "on") // 默认值为 "on"，即默认返回 200
+		// Get query parameter "set"
+		set := c.DefaultQuery("set", "on") // Default value is "on", returns 200
 
 		logger.Info("get switch val", slog.String("pre", pre))
 
-		// 锁住状态修改操作，保证并发安全
+		// Lock status modification for concurrency safety
 		statusLock.Lock()
 		defer statusLock.Unlock()
 
-		// 根据 set 参数来决定状态值和返回的状态码
+		// Determine status and return code based on set parameter
 		if set == "off" {
-			// set 为 "off"，修改状态为 "off"，并返回 500
+			// set is "off", change status to "off", return 500
 			status = "off"
 		} else {
-			// 默认情况或 set 为 "on" 时，修改状态为 "on"，并返回 200
+			// Default or set is "on", change status to "on", return 200
 			status = "on"
 		}
 		c.JSON(http.StatusOK, "success")
@@ -146,7 +147,7 @@ func main() {
 
 		pre := util.GenerateRandomLetters(5)
 
-		// 锁住状态修改操作，保证并发安全
+		// Lock status modification for concurrency safety
 		statusLock.Lock()
 		defer statusLock.Unlock()
 
@@ -159,15 +160,15 @@ func main() {
 		c.JSON(http.StatusOK, "success")
 	})
 
-	// 3. 初始化上报器
+	// 3. Initialize reporter
 	go telemetry.ReportCycle(util.Config_.ControlHost, logPre, logger)
 
-	//启动探测逻辑
+	// Start probing logic
 	cfg := probing.Config{
 		Concurrency: 4,
 		Timeout:     2 * time.Second,
 		Interval:    5 * time.Second,
-		Attempts:    5, // 每轮尝试次数
+		Attempts:    5, // Number of attempts per round
 	}
 	ctx := context.Background()
 	probing.StartProbePeriodically(ctx, util.Config_.ControlHost, cfg, logPre, logger)
@@ -175,10 +176,10 @@ func main() {
 
 	//InitEnvoy(logger, logger1)
 
-	// 4. 启动API服务
-	logger.Info("API端口启动", slog.String("pre", logPre), slog.String("addr", ":8082"))
+	// 4. Start API server
+	logger.Info("API server starting", slog.String("pre", logPre), slog.String("addr", ":8082"))
 	if err := router.Run(":8082"); err != nil {
-		logger.Error("API服务启动失败", slog.String("pre", logPre), slog.Any("err", err))
+		logger.Error("API server startup failed", slog.String("pre", logPre), slog.Any("err", err))
 		return
 	}
 }

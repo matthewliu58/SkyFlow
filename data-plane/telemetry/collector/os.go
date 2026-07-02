@@ -5,7 +5,7 @@ import (
 	"github.com/shirou/gopsutil/v3/host"
 )
 
-// collectOS 采集系统基础信息
+// collectOS collects system basic info
 func collectOS() (model.OSInfo, error) {
 	info, err := host.Info()
 	if err != nil {

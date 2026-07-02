@@ -5,29 +5,30 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/shirou/gopsutil/v3/net"
 	net1 "net"
+
+	"github.com/shirou/gopsutil/v3/net"
 )
 
-// collectNetwork 采集网络信息（含外网IP、端口数、流量）
+// collectNetwork collects network info (public IP, port count, traffic)
 func collectNetwork() (model.NetworkInfo, error) {
-	// 1. 获取外网IP
+	// 1. Get public IP
 	publicIP, err := getPublicIP()
 	if err != nil {
 		publicIP = "no-public-ip"
 	}
 
-	// 2. 获取内网IP（取第一个非回环地址）
+	// 2. Get private IP (first non-loopback address)
 	privateIP := getPrivateIP()
 
-	// 3. 获取端口占用数
+	// 3. Get port count
 	ports, err := net.Connections("all")
 	if err != nil {
 		return model.NetworkInfo{}, err
 	}
 	portCount := len(ports)
 
-	// 4. 获取网卡流量
+	// 4. Get network interface traffic
 	ioStat, err := net.IOCounters(true)
 	if err != nil {
 		return model.NetworkInfo{}, err
@@ -48,7 +49,7 @@ func collectNetwork() (model.NetworkInfo, error) {
 	}, nil
 }
 
-// getPublicIP 获取外网IP
+// getPublicIP gets public IP
 func getPublicIP() (string, error) {
 	resp, err := http.Get("https://icanhazip.com")
 	if err != nil {
@@ -64,48 +65,48 @@ func getPublicIP() (string, error) {
 	return strings.TrimSpace(string(buf[:n])), nil
 }
 
-// getPrivateIP 获取内网IPv4地址（跳过回环、仅取第一个有效IPv4）
-// 依赖：标准库net + strings，无第三方依赖
+// getPrivateIP gets private IPv4 address (skip loopback, only first valid IPv4)
+// Dependencies: standard library net + strings, no third-party dependencies
 func getPrivateIP() string {
-	// 1. 获取所有网络接口（标准库net.Interface列表）
+	// 1. Get all network interfaces (standard library net.Interface list)
 	interfaces, err := net1.Interfaces()
 	if err != nil {
 		return ""
 	}
 
-	// 2. 遍历每个网络接口
+	// 2. Iterate through each network interface
 	for _, iface := range interfaces {
-		// 跳过回环接口（FlagLoopback是标准库net的常量）
+		// Skip loopback interface (FlagLoopback is standard library net constant)
 		if iface.Flags&net1.FlagLoopback != 0 {
 			continue
 		}
-		// 跳过未启动的接口（必须有UP标识）
+		// Skip inactive interface (must have UP flag)
 		if iface.Flags&net1.FlagUp == 0 {
 			continue
 		}
 
-		// 3. 获取当前接口的所有地址（标准库net.Addr列表）
+		// 3. Get all addresses for current interface (standard library net.Addr list)
 		addrList, err := iface.Addrs()
 		if err != nil {
 			continue
 		}
 
-		// 4. 遍历地址，提取IPv4
+		// 4. Iterate through addresses, extract IPv4
 		for _, addr := range addrList {
-			// 类型断言：仅处理IPNet类型（排除unix socket等）
+			// Type assertion: only handle IPNet type (exclude unix socket etc.)
 			ipNet, ok := addr.(*net1.IPNet)
 			if !ok || ipNet.IP.IsLoopback() {
 				continue
 			}
 
-			// 提取纯IPv4地址（跳过IPv6）
+			// Extract pure IPv4 address (skip IPv6)
 			ipv4 := ipNet.IP.To4()
 			if ipv4 != nil {
-				return ipv4.String() // 返回第一个有效IPv4
+				return ipv4.String() // Return first valid IPv4
 			}
 		}
 	}
 
-	// 无有效内网IP
+	// No valid private IP
 	return ""
 }

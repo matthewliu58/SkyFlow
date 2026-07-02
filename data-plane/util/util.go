@@ -6,11 +6,11 @@ import (
 )
 
 func GenerateRandomLetters(length int) string {
-	rand.Seed(time.Now().UnixNano())                                  // 使用当前时间戳作为随机数种子
-	letters := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" // 字母范围（大小写）
+	rand.Seed(time.Now().UnixNano())                                  // Use current timestamp as random seed
+	letters := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" // Letter range (upper and lower case)
 	var result string
 	for i := 0; i < length; i++ {
-		result += string(letters[rand.Intn(len(letters))]) // 随机选择一个字母
+		result += string(letters[rand.Intn(len(letters))]) // Randomly select a letter
 	}
 	return result
 }

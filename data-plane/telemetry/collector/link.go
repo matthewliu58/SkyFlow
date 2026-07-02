@@ -5,7 +5,7 @@ import (
 	model "data-plane/telemetry/model"
 )
 
-// BuildLinkCongestion 从最新探测结果生成链路拥塞信息
+// collectLink generates link congestion info from latest probe results
 func collectLink() []model.LinkInfo {
 	results := probing.GetLatestResults()
 	var links []model.LinkInfo
@@ -15,9 +15,9 @@ func collectLink() []model.LinkInfo {
 			TargetIP:   target,
 			Target:     r.Target,
 			PacketLoss: r.LossRate,
-			//WeightedCache:  0,                                // 如果有缓存数据可以填入
-			AverageLatency: float64(r.AvgRTT.Milliseconds()), // 毫秒
-			//BandwidthUsage: 0,                                // 如果有带宽数据可以填入
+			//WeightedCache:  0,                                // Fill if cache data is available
+			AverageLatency: float64(r.AvgRTT.Milliseconds()), // Milliseconds
+			//BandwidthUsage: 0,                                // Fill if bandwidth data is available
 		})
 	}
 

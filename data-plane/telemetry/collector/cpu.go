@@ -8,20 +8,20 @@ import (
 	"github.com/shirou/gopsutil/v3/load"
 )
 
-// collectCPU 采集CPU信息
-// collectCPU 采集CPU信息（兼容gopsutil v3+跨平台）
+// collectCPU collects CPU info
+// collectCPU collects CPU info (compatible with gopsutil v3+ cross-platform)
 func collectCPU() (model.CPUInfo, error) {
-	// 1. 获取CPU核心数
-	cpuCounts, err := cpu.Counts(true) // 逻辑核数
+	// 1. Get CPU core counts
+	cpuCounts, err := cpu.Counts(true) // Logical core count
 	if err != nil {
 		return model.CPUInfo{}, err
 	}
-	physicalCounts, err := cpu.Counts(false) // 物理核数
+	physicalCounts, err := cpu.Counts(false) // Physical core count
 	if err != nil {
 		return model.CPUInfo{}, err
 	}
 
-	// 2. 获取CPU使用率（采样1秒）
+	// 2. Get CPU usage (sample for 1 second)
 	percent, err := cpu.Percent(1*time.Second, false)
 	if err != nil {
 		return model.CPUInfo{}, err
@@ -31,10 +31,10 @@ func collectCPU() (model.CPUInfo, error) {
 		usage = percent[0]
 	}
 
-	// 3. 获取系统负载（仅Linux/macOS支持，Windows返回0）
+	// 3. Get system load (Linux/macOS only, returns 0 on Windows)
 	var load1Min float64 = 0.0
-	loadStat, err := load.Avg() // v3版本用 load.Avg() 替代 cpu.LoadAvg()
-	if err == nil {             // 仅当无错误时赋值（Windows会报错，直接用0）
+	loadStat, err := load.Avg() // v3 uses load.Avg() instead of cpu.LoadAvg()
+	if err == nil {             // Only assign if no error (Windows may fail, use 0)
 		load1Min = loadStat.Load1
 	}
 
@@ -42,6 +42,6 @@ func collectCPU() (model.CPUInfo, error) {
 		PhysicalCore: physicalCounts,
 		LogicalCore:  cpuCounts,
 		Usage:        usage,
-		Load1Min:     load1Min, // 1分钟负载均值
+		Load1Min:     load1Min, // 1-minute load average
 	}, nil
 }

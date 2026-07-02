@@ -10,32 +10,32 @@ import (
 	"time"
 )
 
-// Result 保存探测结果
+// Result stores probe results
 type Result struct {
-	Target   ProbeTask     `json:"target"`    // 探测目标 IP/host
-	Attempts int           `json:"attempts"`  // 探测次数
-	Failures int           `json:"failures"`  // 失败次数
-	LossRate float64       `json:"loss_rate"` // 丢包率
-	AvgRTT   time.Duration `json:"avg_rtt"`   // 成功连接平均时延
+	Target   ProbeTask     `json:"target"`    // Probe target IP/host
+	Attempts int           `json:"attempts"`  // Number of attempts
+	Failures int           `json:"failures"`  // Number of failures
+	LossRate float64       `json:"loss_rate"` // Packet loss rate
+	AvgRTT   time.Duration `json:"avg_rtt"`   // Average RTT for successful connections
 }
 
-// Config 配置
+// Config probing configuration
 type Config struct {
-	Concurrency int           // 并发数
-	Timeout     time.Duration // TCP Dial 超时
-	Interval    time.Duration // 周期
-	Attempts    int           // 每轮探测尝试次数
-	BufferSize  int           // 可选：channel缓冲大小（现在不用）
+	Concurrency int           // Concurrency count
+	Timeout     time.Duration // TCP Dial timeout
+	Interval    time.Duration // Probe interval
+	Attempts    int           // Number of attempts per probe round
+	BufferSize  int           // Optional: channel buffer size (not used now)
 }
 
-// ----------------- 全局存储最新一轮结果 -----------------
+// ----------------- Global storage for latest round results -----------------
 
 var (
 	mu            sync.RWMutex
 	latestResults = make(map[string]Result)
 )
 
-// 更新全局最新结果
+// Update global latest results
 func updateLatestResults(results []Result) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -44,7 +44,7 @@ func updateLatestResults(results []Result) {
 	}
 }
 
-// 外部调用：获取最新探测结果
+// External call: get latest probe results
 func GetLatestResults() map[string]Result {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -56,13 +56,13 @@ func GetLatestResults() map[string]Result {
 	return copied
 }
 
-// ----------------- 核心周期探测函数 -----------------
+// ----------------- Core periodic probing function -----------------
 
-// StartProbePeriodically 启动无限周期探测
-// ctx 由调用方传入，用于停止
-// controlHost: 探测任务来源接口（返回目标节点列表）
-// cfg: 配置
-// logger: 日志
+// StartProbePeriodically starts infinite periodic probing
+// ctx passed by caller for stopping
+// controlHost: probe task source API (returns target node list)
+// cfg: configuration
+// logger: logger
 func StartProbePeriodically(ctx context.Context, controlHost string, cfg Config, pre string, logger *slog.Logger) {
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 4
@@ -86,26 +86,26 @@ func StartProbePeriodically(ctx context.Context, controlHost string, cfg Config,
 		for {
 			select {
 			case <-ctx.Done():
-				logger.Info("周期探测已停止")
+				logger.Info("periodic probing stopped")
 				return
 			default:
 			}
 
 			pre_ := util.GenerateRandomLetters(5)
 
-			// 获取探测任务
+			// Get probe tasks
 			targets, err := GetProbeTasks(pre, controlHost)
 			if err != nil {
-				logger.Error("获取探测任务失败", slog.Any("err", err))
-				time.Sleep(time.Second) // 防止死循环快速重试
+				logger.Error("get probe tasks failed", slog.Any("err", err))
+				time.Sleep(time.Second) // Prevent rapid retry in case of error
 				continue
 			}
 			logger.Info("get probing tasks", slog.String("pre", pre_), slog.Any("targets", targets))
 
-			// 执行一轮探测
+			// Execute one round of probing
 			doProbeLossRTT(targets, cfg, pre, logger)
 
-			// 等待下一个周期
+			// Wait for next period
 			select {
 			case <-ctx.Done():
 				return
@@ -115,7 +115,7 @@ func StartProbePeriodically(ctx context.Context, controlHost string, cfg Config,
 	}()
 }
 
-// ----------------- 单轮探测函数 -----------------
+// ----------------- Single round probing function -----------------
 
 func doProbeLossRTT(targets []ProbeTask, cfg Config, pre string, logger *slog.Logger) {
 	jobs := make(chan ProbeTask)
@@ -143,21 +143,21 @@ func doProbeLossRTT(targets []ProbeTask, cfg Config, pre string, logger *slog.Lo
 					rtt := time.Since(start)
 
 					if err != nil {
-						//关键：区分错误类型
+						// Key: distinguish error types
 						if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-							// 网络不通 / 丢包
+							// Network unreachable / packet loss
 							failures++
 							continue
 						}
 
-						// 非 timeout（通常是 RST）
-						// 网络是通的，只是端口没服务
+						// Non-timeout (usually RST)
+						// Network is reachable, but no service on port
 						successes++
 						totalRTT += rtt
 						continue
 					}
 
-					// 正常连上
+					// Connected successfully
 					successes++
 					totalRTT += rtt
 					conn.Close()
@@ -185,7 +185,7 @@ func doProbeLossRTT(targets []ProbeTask, cfg Config, pre string, logger *slog.Lo
 					slog.Any("result", result),
 				)
 
-				// 收集到本轮结果
+				// Collect to current round results
 				roundMu.Lock()
 				roundResults = append(roundResults, result)
 				roundMu.Unlock()
@@ -193,7 +193,7 @@ func doProbeLossRTT(targets []ProbeTask, cfg Config, pre string, logger *slog.Lo
 		}()
 	}
 
-	// 投递任务
+	// Dispatch tasks
 	go func() {
 		for _, t := range targets {
 			jobs <- t
@@ -203,6 +203,6 @@ func doProbeLossRTT(targets []ProbeTask, cfg Config, pre string, logger *slog.Lo
 
 	wg.Wait()
 
-	// 更新全局最新结果
+	// Update global latest results
 	updateLatestResults(roundResults)
 }

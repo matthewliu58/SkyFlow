@@ -9,7 +9,7 @@ import (
 )
 
 func collectQueue() (model.QueueInfo, error) {
-	url := "http://127.0.0.1:8095/getCongestionInfo"
+	url := "http://127.0.0.1:8095/QueueInfo"
 
 	p := model.QueueInfo{}
 
